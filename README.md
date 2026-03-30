@@ -1,6 +1,6 @@
-# Extension Source Viewer
+# modcore Source (formerly Extension Source Viewer)
 
-**Extension Source Viewer** is a web-based tool for examining the source code of Chrome extensions. By uploading a `.crx` file, you can view its extracted contents directly in your browser. All processing takes place locally on your device; no data is transmitted to any server.
+**modcore Source** is a web-based tool for examining the source code of Chrome extensions. By uploading a `.crx` file, you can view its extracted contents directly in your browser. All processing takes place locally on your device; no data is transmitted to any server.
 
 This tool is part of the **modcore** ecosystem and is optimized for use with the **modcore Extension Manager**, which provides the “Get CRX of this extension” feature for downloading CRX files from the Chrome Web Store.
 
@@ -20,7 +20,7 @@ This tool is part of the **modcore** ecosystem and is optimized for use with the
 1. Install the **modcore Extension Manager** and pin it to the Chrome extensions toolbar.  
 2. Visit any extension page in the Chrome Web Store.  
 3. Right-click the modcore Extension Manager icon and select **“Get CRX of this extension.”**  
-4. After the CRX file is downloaded, open the Extension Source Viewer at:  
+4. After the CRX file is downloaded, open modcore Source at:  
    `https://modcoretech.github.io/extension-source-viewer/viewer.html`  
 5. Upload the CRX file to view and explore the source code.
 
@@ -30,7 +30,7 @@ This tool is part of the **modcore** ecosystem and is optimized for use with the
 
 - The “Get CRX of this extension” feature works only on the Chrome Web Store.  
 - Some extensions may include protected or obfuscated source code. Such code should not be modified.  
-- Extension Source Viewer is under active development, and improvements are ongoing.
+- modcore Source is under active development, and improvements are ongoing.
 
 ---
 
