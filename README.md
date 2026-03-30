@@ -21,7 +21,7 @@ This tool is part of the **modcore** ecosystem and is optimized for use with the
 2. Visit any extension page in the Chrome Web Store.  
 3. Right-click the modcore Extension Manager icon and select **“Get CRX of this extension.”**  
 4. After the CRX file is downloaded, open modcore Source at:  
-   `https://modcoretech.github.io/extension-source-viewer/viewer.html`  
+   `https://modcoretech.github.io/modcore-source/viewer.html`  
 5. Upload the CRX file to view and explore the source code.
 
 ---
