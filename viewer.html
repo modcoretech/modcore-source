@@ -3,234 +3,277 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Advanced CRX/ZIP Inspector</title>
+<title>modcore Source</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
-
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/json/json.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/markdown/markdown.min.js"></script>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/dialog/dialog.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/dialog/dialog.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/search/searchcursor.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/search/search.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/selection/active-line.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldgutter.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/brace-fold.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/xml-fold.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldgutter.min.css">
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.14.0/beautify.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.2/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-<style>
-  /* Base Styles */
-  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  
-  /* Scrollbars */
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track { background: #111827; }
-  ::-webkit-scrollbar-thumb { background-color: #374151; border-radius: 5px; border: 2px solid #111827; }
-  ::-webkit-scrollbar-thumb:hover { background-color: #4b5563; }
-
-  /* Split.js Gutters */
-  .gutter { background-color: #1f2937; background-repeat: no-repeat; background-position: 50%; transition: background 0.2s; position: relative; z-index: 10; }
-  .gutter:hover { background-color: #3b82f6; }
-  .gutter.gutter-horizontal { cursor: col-resize; }
-
-  /* Tree View */
-  .tree-node { 
-      @apply flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer select-none text-sm text-gray-400 border border-transparent transition-all; 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Geist', 'sans-serif'],
+          mono: ['Geist Mono', 'monospace'],
+        }
+      }
+    }
   }
-  .tree-node:hover { @apply bg-gray-800 text-gray-200; }
-  .tree-node.active { @apply bg-blue-900/40 text-blue-300 border-blue-500/30; }
-  /* Highlight for search matches */
-  .tree-node.highlight-match { @apply text-yellow-300 font-medium; }
-
-  /* CodeMirror Overrides */
-  .CodeMirror { height: 100%; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; line-height: 1.6; background-color: #1f2937 !important; }
-  .cm-s-dracula.CodeMirror { background-color: #0f111a !important; }
-  .cm-s-dracula .CodeMirror-gutters { background-color: #0f111a !important; border-right: 1px solid #1f2937; }
-  .CodeMirror-activeline-background { background: #1e293b !important; }
-
-  /* Tabs Styling */
+</script>
+<style>
+  * { font-family: 'Geist', sans-serif; }
+  code, pre, .mono { font-family: 'Geist Mono', monospace; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #000; }
+  ::-webkit-scrollbar-thumb { background: #222; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #333; }
+  .gutter { background: #111; cursor: col-resize; transition: background 0.15s; }
+  .gutter:hover { background: #3b82f6; }
   #tabsContainer { scrollbar-width: none; }
   #tabsContainer::-webkit-scrollbar { display: none; }
-  
-  .tab-item { 
-      @apply flex items-center gap-2 px-3 py-2 text-xs border-r border-gray-700 text-gray-400 cursor-pointer bg-gray-800 transition-colors select-none min-w-[120px] max-w-[200px] h-full relative; 
-  }
-  .tab-item:hover { @apply bg-gray-700 text-gray-200; }
-  .tab-item.active { @apply bg-[#0f111a] text-blue-400 border-t-2 border-t-blue-500; }
-  .tab-close { @apply opacity-0 hover:bg-red-500/20 hover:text-red-400 rounded p-0.5 transition-all; }
-  .tab-item:hover .tab-close, .tab-item.active .tab-close { opacity: 1; }
-
-  /* Context Menu */
-  #contextMenu { @apply fixed bg-gray-800 border border-gray-700 shadow-xl rounded-lg py-1 z-50 hidden min-w-[160px]; }
-  .ctx-item { @apply px-4 py-2 text-sm text-gray-300 hover:bg-blue-600 hover:text-white cursor-pointer flex items-center gap-2; }
-
-  /* Markdown */
-  .markdown-body { @apply p-8 prose prose-invert prose-sm max-w-none overflow-auto h-full bg-[#0f111a]; }
-
-  /* Loading Overlay */
-  #loadingOverlay { backdrop-filter: blur(2px); }
+  /* Monaco host */
+  #monacoHost { width: 100%; height: 100%; }
 </style>
 </head>
-<body class="flex flex-col h-screen bg-gray-900 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
+<body class="flex flex-col h-screen bg-black text-zinc-300 overflow-hidden select-none">
 
-<div id="contextMenu">
-    <div class="ctx-item" id="ctxCopyPath"><i class="fa-regular fa-copy"></i> Copy Path</div>
-    <div class="ctx-item" id="ctxDownload"><i class="fa-solid fa-download"></i> Download</div>
+<!-- Drop Overlay -->
+<div id="dropOverlay" class="fixed inset-0 bg-black/80 z-50 hidden flex-col items-center justify-center border-2 border-blue-500 border-dashed m-4 rounded-xl pointer-events-none">
+  <i class="fa-solid fa-cloud-arrow-up text-5xl text-blue-400 mb-3"></i>
+  <p class="text-lg font-semibold text-white">Drop CRX file to inspect</p>
 </div>
 
-<div id="dropOverlay" class="fixed inset-0 bg-gray-900/90 z-50 hidden flex flex-col items-center justify-center border-4 border-blue-500 border-dashed m-6 rounded-2xl pointer-events-none">
-    <i class="fa-solid fa-cloud-arrow-up text-6xl text-blue-400 mb-4 animate-bounce"></i>
-    <h2 class="text-3xl font-bold text-white">Drop to Analyze</h2>
-</div>
-
-<div id="loadingOverlay" class="fixed inset-0 bg-black/50 z-[60] hidden flex flex-col items-center justify-center">
-    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-    <p class="text-white font-medium animate-pulse">Processing...</p>
-</div>
-
-<header class="flex justify-between items-center bg-gray-800 border-b border-gray-700 px-4 h-14 flex-shrink-0 z-20">
-  <div class="flex items-center gap-3">
-    <div class="bg-gradient-to-br from-blue-600 to-blue-800 text-white p-1.5 rounded-lg shadow-lg">
-        <i class="fa-solid fa-box-open text-sm"></i>
-    </div>
-    <h1 class="text-base font-bold tracking-wide text-gray-100">
-      CRX<span class="text-blue-500">/</span>Inspector
-    </h1>
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-black/70 z-[60] hidden flex-col items-center justify-center backdrop-blur-sm">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-8 h-8 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin"></div>
+    <p id="loadingMsg" class="text-sm text-zinc-400 font-mono">Loading...</p>
   </div>
-  
-  <div class="flex items-center gap-3">
-    <button id="exportBtn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2 border border-gray-600">
-        <i class="fa-solid fa-file-zipper"></i> Export ZIP
+</div>
+
+<!-- Context Menu -->
+<div id="contextMenu" class="fixed bg-zinc-900 border border-zinc-800 shadow-2xl rounded-lg py-1 z-50 hidden min-w-[180px] text-sm">
+  <div id="ctxOpen" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-regular fa-folder-open w-4 text-center text-zinc-500"></i> Open</div>
+  <div id="ctxCopyPath" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-regular fa-copy w-4 text-center text-zinc-500"></i> Copy Path</div>
+  <div id="ctxCopyName" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-solid fa-tag w-4 text-center text-zinc-500"></i> Copy Name</div>
+  <div class="border-t border-zinc-800 my-1"></div>
+  <div id="ctxDownload" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-solid fa-download w-4 text-center text-zinc-500"></i> Download File</div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl text-sm font-medium text-white transform transition-all duration-300 translate-y-16 opacity-0 z-[100] flex items-center gap-2.5 max-w-xs">
+  <i id="toastIcon" class="fa-solid fa-check text-green-400 text-xs"></i>
+  <span id="toastMsg">OK</span>
+</div>
+
+<!-- HEADER -->
+<header class="flex items-center justify-between bg-black border-b border-zinc-900 px-4 h-12 flex-shrink-0 z-20">
+  <div class="flex items-center gap-2.5">
+    <div class="w-6 h-6 bg-blue-600 rounded flex items-center justify-center">
+      <i class="fa-solid fa-puzzle-piece text-[10px] text-white"></i>
+    </div>
+    <span class="text-sm font-semibold text-white tracking-tight">modcore Source</span>
+    <span id="loadedFileName" class="hidden text-xs text-zinc-600 font-mono ml-1"></span>
+  </div>
+  <div class="flex items-center gap-2">
+    <button id="statsBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800">
+      <i class="fa-solid fa-chart-bar"></i> Stats
     </button>
-    <label class="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-lg shadow-blue-500/20">
-        <i class="fa-solid fa-upload"></i> Open File
-        <input type="file" id="crxInput" accept=".crx, .zip, .xpi" class="hidden">
+    <button id="manifestBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800">
+      <i class="fa-solid fa-info-circle"></i> Manifest
+    </button>
+    <button id="exportBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-zinc-800">
+      <i class="fa-solid fa-file-zipper"></i> Export ZIP
+    </button>
+    <label class="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition cursor-pointer">
+      <i class="fa-solid fa-upload text-[10px]"></i> Open CRX
+      <input type="file" id="crxInput" accept=".crx" class="hidden">
     </label>
   </div>
 </header>
 
+<!-- MAIN -->
 <div class="flex-1 flex overflow-hidden relative">
-  
-  <div id="sidebar" class="bg-gray-800 flex flex-col border-r border-gray-700 min-w-[220px]">
-    
-    <div class="p-2 border-b border-gray-700 bg-gray-800">
+
+  <!-- SIDEBAR -->
+  <div id="sidebar" class="bg-black flex flex-col border-r border-zinc-900 min-w-[200px]">
+
+    <!-- Search -->
+    <div class="p-2 border-b border-zinc-900">
       <div class="relative">
-          <i class="fa-solid fa-search absolute left-3 top-2.5 text-gray-500 text-xs"></i>
-          <input type="text" id="searchBox" placeholder="Filter files (recursive)..." class="w-full bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded pl-8 pr-2 py-2 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none placeholder-gray-600 transition-all">
+        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-zinc-600 text-[11px]"></i>
+        <input type="text" id="searchBox" placeholder="Search files…" autocomplete="off"
+          class="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 text-xs rounded pl-7 pr-2 py-1.5 focus:outline-none focus:border-zinc-700 placeholder-zinc-700 font-mono transition">
       </div>
     </div>
 
-    <div id="fileTree" role="tree" class="flex-1 overflow-auto p-2 pb-10 custom-scrollbar focus:outline-none" tabindex="0">
-      <div id="treePlaceholder" class="flex flex-col items-center justify-center h-64 text-gray-500 opacity-60">
-        <i class="fa-solid fa-folder-tree text-4xl mb-3 text-gray-600"></i>
-        <p class="text-xs">No file loaded</p>
+    <!-- File Count + Collapse All -->
+    <div id="sidebarMeta" class="hidden px-3 py-1.5 flex items-center justify-between border-b border-zinc-900">
+      <span id="fileCountLabel" class="text-[10px] text-zinc-600 font-mono"></span>
+      <button id="collapseAllBtn" class="text-[10px] text-zinc-600 hover:text-zinc-400 transition">collapse all</button>
+    </div>
+
+    <!-- Tree -->
+    <div id="fileTree" class="flex-1 overflow-auto py-1 px-1 focus:outline-none" tabindex="0">
+      <div id="treePlaceholder" class="flex flex-col items-center justify-center h-full text-zinc-700 pt-16 pb-8">
+        <i class="fa-solid fa-puzzle-piece text-3xl mb-3 text-zinc-800"></i>
+        <p class="text-xs text-center leading-relaxed">Open a <span class="font-mono text-zinc-600">.crx</span> file<br>to inspect its contents</p>
       </div>
     </div>
-    
-    <div id="fileInfoPanel" class="p-3 bg-gray-900 border-t border-gray-700 text-[10px] text-gray-400 hidden">
-        <div class="flex justify-between mb-1"><span class="font-bold text-gray-500">SIZE</span> <span id="infoSize" class="text-gray-300">-</span></div>
-        <div class="flex justify-between"><span class="font-bold text-gray-500">TYPE</span> <span id="infoType" class="text-gray-300">-</span></div>
+
+    <!-- File Info -->
+    <div id="fileInfoPanel" class="hidden px-3 py-2 bg-zinc-950 border-t border-zinc-900 text-[10px] font-mono text-zinc-600 space-y-1">
+      <div class="flex justify-between"><span class="text-zinc-700">SIZE</span><span id="infoSize" class="text-zinc-400"></span></div>
+      <div class="flex justify-between"><span class="text-zinc-700">TYPE</span><span id="infoType" class="text-zinc-400 uppercase"></span></div>
+      <div class="flex justify-between"><span class="text-zinc-700">PATH</span><span id="infoPath" class="text-zinc-500 truncate max-w-[120px]"></span></div>
     </div>
   </div>
 
-  <div id="mainContent" class="bg-[#0f111a] flex flex-col flex-1 overflow-hidden min-w-[300px]">
-    
-    <div id="tabsWrapper" class="bg-gray-800 border-b border-gray-700 h-9 flex hidden">
-        <div id="tabsContainer" class="flex-1 flex overflow-x-auto">
-            </div>
+  <!-- EDITOR AREA -->
+  <div id="mainContent" class="bg-black flex flex-col flex-1 overflow-hidden min-w-[300px]">
+
+    <!-- Tabs -->
+    <div id="tabsWrapper" class="hidden bg-black border-b border-zinc-900 h-9 flex">
+      <div id="tabsContainer" class="flex-1 flex overflow-x-auto items-stretch">
+      </div>
+      <button id="closeAllTabsBtn" class="px-3 text-zinc-700 hover:text-zinc-400 border-l border-zinc-900 hover:bg-zinc-950 transition text-[10px]" title="Close all tabs">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
 
-    <div id="editorToolbar" class="h-9 border-b border-gray-700 bg-gray-800/30 flex items-center justify-between px-4 hidden backdrop-blur-sm">
-       <div class="flex items-center gap-2 text-xs text-gray-400 overflow-hidden">
-           <i class="fa-regular fa-folder-open text-blue-500"></i>
-           <span id="filePathDisplay" class="font-mono text-gray-300 truncate"></span>
-       </div>
-       <div class="flex items-center gap-3">
-           <button id="markdownPreviewBtn" class="hidden text-gray-400 hover:text-white text-xs gap-1 flex items-center" title="Toggle Preview">
-               <i class="fa-solid fa-book-open"></i> Read
-           </button>
-           <div class="h-3 w-px bg-gray-600"></div>
-           <button id="unminifyBtn" class="text-yellow-600 hover:text-yellow-400 text-xs font-semibold hidden flex items-center gap-1" title="Format Code">
-               <i class="fa-solid fa-wand-magic-sparkles"></i> Prettify
-           </button>
-           <button id="copyFileBtn" class="text-gray-400 hover:text-white text-xs flex items-center gap-1" title="Copy Content">
-               <i class="fa-regular fa-copy"></i> Copy
-           </button>
-       </div>
+    <!-- Toolbar -->
+    <div id="editorToolbar" class="hidden h-8 border-b border-zinc-900 bg-black flex items-center justify-between px-3 text-[11px]">
+      <div class="flex items-center gap-1.5 overflow-hidden text-zinc-600 min-w-0">
+        <i class="fa-regular fa-file text-[10px] flex-shrink-0"></i>
+        <span id="filePathDisplay" class="font-mono truncate text-zinc-500"></span>
+      </div>
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <button id="markdownPreviewBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition">
+          <i class="fa-solid fa-book-open text-[10px]"></i> Preview
+        </button>
+        <button id="wrapBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition" title="Toggle word wrap">
+          <i class="fa-solid fa-text-width text-[10px]"></i> Wrap
+        </button>
+        <button id="unminifyBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-yellow-700 hover:text-yellow-400 hover:bg-zinc-900 transition">
+          <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Format
+        </button>
+        <button id="copyFileBtn" class="flex items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition">
+          <i class="fa-regular fa-copy text-[10px]"></i> Copy
+        </button>
+        <button id="downloadFileBtn" class="flex items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition">
+          <i class="fa-solid fa-download text-[10px]"></i>
+        </button>
+      </div>
     </div>
 
-    <div id="viewerContainer" class="flex-1 relative overflow-hidden bg-[#0f111a]">
-        
-        <div id="welcomeScreen" class="absolute inset-0 flex flex-col items-center justify-center text-gray-600 select-none z-10 bg-gray-900">
-            <div class="flex flex-col items-center animate-fade-in">
-                <div class="w-20 h-20 bg-gray-800 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-gray-700">
-                    <i class="fa-solid fa-cloud-arrow-up text-4xl text-blue-500"></i>
-                </div>
-                <h3 class="text-xl font-bold text-gray-200">Start Analyzing</h3>
-                <p class="text-sm mt-2 text-gray-500 text-center max-w-xs">Open a CRX, ZIP, or XPI file to inspect its source code and assets.</p>
-                <button id="heroUploadBtn" class="mt-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full text-sm font-medium transition shadow-lg shadow-blue-500/20">
-                    Select File
-                </button>
-            </div>
-        </div>
+    <!-- Viewers -->
+    <div id="viewerContainer" class="flex-1 relative overflow-hidden bg-black">
 
-        <div id="noFileSelected" class="absolute inset-0 flex flex-col items-center justify-center text-gray-600 select-none z-10 bg-[#0f111a] hidden">
-            <i class="fa-solid fa-code-branch text-5xl text-gray-700 mb-4"></i>
-            <h3 class="text-lg font-medium text-gray-400">No File Open</h3>
-            <p class="text-xs mt-2 text-gray-600">Select a file from the sidebar.</p>
+      <!-- Welcome -->
+      <div id="welcomeScreen" class="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black">
+        <div class="flex flex-col items-center text-center max-w-xs">
+          <div class="w-16 h-16 bg-zinc-950 border border-zinc-900 rounded-2xl flex items-center justify-center mb-5">
+            <i class="fa-solid fa-puzzle-piece text-3xl text-blue-500"></i>
+          </div>
+          <h2 class="text-base font-semibold text-white mb-1.5">modcore Source</h2>
+          <p class="text-xs text-zinc-600 leading-relaxed mb-5">Inspect Chrome Extension files.<br>Drag & drop or open a <span class="font-mono">.crx</span> to get started.</p>
+          <button id="heroUploadBtn" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition">
+            Open CRX File
+          </button>
+          <p class="text-[10px] text-zinc-800 mt-4">Supports all CRX2 and CRX3 formats</p>
         </div>
+      </div>
 
-        <div id="editorWrapper" class="h-full hidden"></div>
-        
-        <div id="markdownViewer" class="markdown-body hidden"></div>
+      <!-- No file selected -->
+      <div id="noFileSelected" class="hidden absolute inset-0 flex flex-col items-center justify-center z-10 bg-black">
+        <i class="fa-regular fa-file-code text-4xl text-zinc-800 mb-3"></i>
+        <p class="text-sm text-zinc-600">Select a file from the sidebar</p>
+        <p class="text-xs text-zinc-800 mt-1 font-mono">← pick something</p>
+      </div>
 
-        <div id="mediaViewer" class="hidden h-full flex flex-col items-center justify-center bg-[#0f111a] relative overflow-hidden">
-            <div class="absolute bottom-6 flex gap-2 z-10 bg-gray-800/80 backdrop-blur p-1.5 rounded-full border border-gray-600 shadow-xl">
-                 <button id="zoomOut" class="w-8 h-8 rounded-full hover:bg-gray-600 text-gray-300 flex items-center justify-center"><i class="fa-solid fa-minus"></i></button>
-                 <span id="zoomLevelDisplay" class="w-12 text-center text-xs font-mono text-gray-300 flex items-center justify-center">100%</span>
-                 <button id="zoomIn" class="w-8 h-8 rounded-full hover:bg-gray-600 text-gray-300 flex items-center justify-center"><i class="fa-solid fa-plus"></i></button>
-                 <button id="resetZoom" class="w-8 h-8 rounded-full hover:bg-gray-600 text-gray-300 flex items-center justify-center" title="Reset"><i class="fa-solid fa-compress"></i></button>
-            </div>
-            <div id="mediaContainer" class="transform-gpu transition-transform duration-100 ease-out origin-center p-10">
-                </div>
+      <!-- Monaco -->
+      <div id="editorWrapper" class="h-full hidden"></div>
+      <div id="monacoHost" class="hidden h-full"></div>
+
+      <!-- Markdown Preview -->
+      <div id="markdownViewer" class="hidden h-full overflow-auto bg-black px-10 py-8">
+        <div id="markdownContent" class="prose prose-invert prose-sm max-w-3xl mx-auto font-sans"></div>
+      </div>
+
+      <!-- Media Viewer -->
+      <div id="mediaViewer" class="hidden h-full flex flex-col items-center justify-center bg-black relative overflow-hidden">
+        <div id="mediaContainer" class="origin-center transition-transform duration-100 ease-out"></div>
+        <!-- Zoom controls -->
+        <div class="absolute bottom-4 flex items-center gap-1 bg-zinc-950 border border-zinc-900 rounded-full px-2 py-1">
+          <button id="zoomOut" class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs"><i class="fa-solid fa-minus"></i></button>
+          <span id="zoomLevelDisplay" class="text-[10px] font-mono text-zinc-500 w-10 text-center">100%</span>
+          <button id="zoomIn" class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs"><i class="fa-solid fa-plus"></i></button>
+          <div class="w-px h-3 bg-zinc-800 mx-1"></div>
+          <button id="resetZoom" class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs" title="Reset"><i class="fa-solid fa-compress"></i></button>
         </div>
+      </div>
+
+      <!-- Audio Viewer -->
+      <div id="audioViewer" class="hidden h-full flex flex-col items-center justify-center bg-black gap-4">
+        <div class="w-20 h-20 bg-zinc-950 border border-zinc-900 rounded-2xl flex items-center justify-center">
+          <i id="audioIcon" class="fa-solid fa-music text-3xl text-blue-400"></i>
+        </div>
+        <p id="audioFileName" class="text-xs font-mono text-zinc-500"></p>
+        <audio id="audioPlayer" controls class="rounded-lg" style="filter: invert(1) hue-rotate(180deg); width: 300px;"></audio>
+      </div>
+
+      <!-- Video Viewer -->
+      <div id="videoViewer" class="hidden h-full flex items-center justify-center bg-black p-6">
+        <video id="videoPlayer" controls class="max-w-full max-h-full rounded-lg shadow-2xl" style="max-height: calc(100% - 40px);"></video>
+      </div>
+
+      <!-- Binary Viewer -->
+      <div id="binaryViewer" class="hidden h-full flex flex-col items-center justify-center bg-black gap-3">
+        <div class="w-16 h-16 bg-zinc-950 border border-zinc-900 rounded-xl flex items-center justify-center">
+          <i id="binaryIcon" class="fa-solid fa-file-binary text-2xl text-zinc-600"></i>
+        </div>
+        <p id="binaryLabel" class="text-sm text-zinc-500"></p>
+        <p id="binarySize" class="text-xs font-mono text-zinc-700"></p>
+        <button id="binaryDownloadBtn" class="mt-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs rounded-lg transition flex items-center gap-2">
+          <i class="fa-solid fa-download"></i> Download File
+        </button>
+      </div>
+
+      <!-- Stats Panel -->
+      <div id="statsPanel" class="hidden h-full overflow-auto bg-black p-6">
+        <h2 class="text-sm font-semibold text-white mb-4">Extension Statistics</h2>
+        <div id="statsContent" class="space-y-4 text-xs text-zinc-400 font-mono"></div>
+      </div>
+
+      <!-- Manifest Panel -->
+      <div id="manifestPanel" class="hidden h-full overflow-auto bg-black"></div>
 
     </div>
 
-    <div id="statusBar" class="h-6 bg-gray-800 border-t border-gray-700 flex justify-between items-center px-3 text-[10px] text-gray-400 select-none flex-shrink-0">
-        <div class="flex items-center gap-2">
-            <div class="w-2 h-2 rounded-full bg-green-500"></div>
-            <span id="statusMsg">Ready</span>
-        </div>
-        <div class="flex gap-4 font-mono">
-            <span id="langDisplay">Text</span>
-            <span>Ln <span id="cursorLine">1</span>, Col <span id="cursorCol">1</span></span>
-        </div>
+    <!-- Status Bar -->
+    <div id="statusBar" class="h-6 bg-black border-t border-zinc-900 flex justify-between items-center px-3 text-[10px] text-zinc-700 flex-shrink-0 font-mono">
+      <div class="flex items-center gap-2">
+        <div id="statusDot" class="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
+        <span id="statusMsg">Ready</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span id="langDisplay"></span>
+        <span>Ln <span id="cursorLine">1</span>, Col <span id="cursorCol">1</span></span>
+        <span id="selectionInfo" class="hidden"></span>
+      </div>
     </div>
   </div>
 </div>
 
-<div id="toast" class="fixed bottom-6 right-6 px-4 py-3 rounded bg-gray-800 border-l-4 border-blue-500 shadow-2xl text-white font-medium text-sm transform transition-all duration-300 translate-y-20 opacity-0 z-[100] flex items-center gap-3">
-    <i id="toastIcon" class="fa-solid fa-info-circle text-blue-400"></i>
-    <span id="toastMsg">Notification</span>
-</div>
-
+<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-html.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>
