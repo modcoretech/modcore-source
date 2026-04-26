@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>modcore Source Diff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Geist', 'sans-serif'],
+          mono: ['Geist Mono', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  * { font-family: 'Geist', sans-serif; }
+  code, pre, .mono { font-family: 'Geist Mono', monospace; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #000; }
+  ::-webkit-scrollbar-thumb { background: #222; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #333; }
+
+  .gutter { background: #0a0a0a; cursor: col-resize; transition: background 0.15s; }
+  .gutter:hover { background: #2563eb; }
+
+  #tabsContainer { scrollbar-width: none; }
+  #tabsContainer::-webkit-scrollbar { display: none; }
+
+  /* Drop zones */
+  .drop-zone { transition: all 0.2s; }
+  .drop-zone.drag-over { border-color: #3b82f6 !important; background: #1d4ed810 !important; }
+  .drop-zone.loaded { border-color: #22c55e !important; }
+
+  /* Diff coloring in tree */
+  .diff-added    { color: #4ade80; }
+  .diff-removed  { color: #f87171; }
+  .diff-modified { color: #facc15; }
+  .diff-same     { color: #52525b; }
+  .diff-binary   { color: #a78bfa; }
+  .diff-media    { color: #22d3ee; }
+
+  /* Inline diff badges */
+  .badge-added    { background: #14532d; color: #4ade80; }
+  .badge-removed  { background: #450a0a; color: #f87171; }
+  .badge-modified { background: #422006; color: #facc15; }
+  .badge-same     { background: #18181b; color: #52525b; }
+
+  /* Monaco host fills container */
+  .monaco-fill { width: 100%; height: 100%; }
+
+  /* Side by side panes */
+  .side-label {
+    position: absolute;
+    top: 8px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: 'Geist Mono', monospace;
+    font-weight: 600;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  /* Diff inline mode lines */
+  .diff-line { display: flex; font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 20px; }
+  .diff-line-num { width: 40px; text-align: right; padding-right: 12px; flex-shrink: 0; color: #3f3f46; user-select: none; }
+  .diff-line-code { flex: 1; white-space: pre; overflow-x: auto; padding-left: 8px; }
+  .diff-line.add { background: #0d2818; }
+  .diff-line.add .diff-line-num { color: #16a34a; }
+  .diff-line.add .diff-line-code { color: #86efac; }
+  .diff-line.del { background: #2d0a0a; }
+  .diff-line.del .diff-line-num { color: #dc2626; }
+  .diff-line.del .diff-line-code { color: #fca5a5; }
+  .diff-line.ctx { background: transparent; }
+  .diff-line.ctx .diff-line-code { color: #71717a; }
+  .diff-line.hunk { background: #0c1a2e; color: #60a5fa; font-family: 'Geist Mono', monospace; font-size: 11px; padding: 2px 8px; }
+
+  /* Stats bar colors */
+  .stat-bar { height: 4px; border-radius: 2px; }
+
+  /* Transition for panels */
+  .panel-fade { animation: fadeIn 0.15s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Selected file in tree */
+  .tree-selected { background: #1e1e1e; color: #fff !important; }
+
+  /* Filter tabs */
+  .filter-tab { transition: all 0.15s; }
+  .filter-tab.active { color: #fff; border-bottom: 2px solid #3b82f6; }
+
+  /* Image diff checker */
+  .checker-bg { background-image: repeating-conic-gradient(#1a1a1a 0% 25%, #111 0% 50%); background-size: 16px 16px; }
+
+  /* Media viewer */
+  #mediaViewerLeft, #mediaViewerRight { transition: transform 0.1s ease-out; transform-origin: center; }
+
+  /* Resize handle for split */
+  .resize-handle { width: 3px; cursor: col-resize; background: #111; flex-shrink: 0; }
+  .resize-handle:hover { background: #2563eb; }
+</style>
+</head>
+<body class="flex flex-col h-screen bg-black text-zinc-300 overflow-hidden select-none">
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-black/75 z-[60] hidden flex-col items-center justify-center backdrop-blur-sm">
+  <div class="flex flex-col items-center gap-3">
+    <div class="w-8 h-8 border-2 border-zinc-800 border-t-blue-500 rounded-full animate-spin"></div>
+    <p id="loadingMsg" class="text-sm text-zinc-400 font-mono">Loading…</p>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl text-sm font-medium text-white transform transition-all duration-300 translate-y-16 opacity-0 z-[100] flex items-center gap-2.5 max-w-xs">
+  <i id="toastIcon" class="fa-solid fa-check text-green-400 text-xs"></i>
+  <span id="toastMsg">OK</span>
+</div>
+
+<!-- Context Menu -->
+<div id="contextMenu" class="fixed bg-zinc-900 border border-zinc-800 shadow-2xl rounded-lg py-1 z-50 hidden min-w-[180px] text-sm">
+  <div id="ctxDiffFile" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-solid fa-code-compare w-4 text-center text-zinc-500"></i> Diff This File</div>
+  <div id="ctxViewLeft" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-regular fa-eye w-4 text-center text-zinc-500"></i> View in A</div>
+  <div id="ctxViewRight" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-regular fa-eye w-4 text-center text-zinc-500"></i> View in B</div>
+  <div class="border-t border-zinc-800 my-1"></div>
+  <div id="ctxCopyPath" class="px-3 py-2 hover:bg-zinc-800 cursor-pointer flex items-center gap-2 text-zinc-300"><i class="fa-regular fa-copy w-4 text-center text-zinc-500"></i> Copy Path</div>
+</div>
+
+<!-- HEADER -->
+<header class="flex items-center justify-between bg-black border-b border-zinc-900 px-4 h-12 flex-shrink-0 z-20">
+  <div class="flex items-center gap-3">
+    <div class="w-6 h-6 bg-blue-600 rounded flex items-center justify-center">
+      <i class="fa-solid fa-code-compare text-[10px] text-white"></i>
+    </div>
+    <span class="text-sm font-semibold text-white tracking-tight">modcore Source Diff</span>
+    <div id="headerVersions" class="hidden items-center gap-2 text-xs font-mono">
+      <span id="headerVerA" class="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400"></span>
+      <i class="fa-solid fa-arrow-right text-zinc-700 text-[10px]"></i>
+      <span id="headerVerB" class="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400"></span>
+    </div>
+  </div>
+  <div class="flex items-center gap-2">
+    <!-- Diff mode toggle -->
+    <div id="diffModeToggle" class="hidden items-center bg-zinc-950 border border-zinc-900 rounded overflow-hidden text-xs">
+      <button id="modeSideBySide" class="px-2.5 py-1.5 text-zinc-400 hover:text-white hover:bg-zinc-900 transition" title="Side by side">
+        <i class="fa-solid fa-table-columns"></i>
+      </button>
+      <button id="modeInline" class="px-2.5 py-1.5 text-zinc-400 hover:text-white hover:bg-zinc-900 transition" title="Inline">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+    </div>
+    <!-- Filter -->
+    <div id="filterToggle" class="hidden items-center gap-1 text-xs">
+      <button id="showChangesOnly" class="px-2.5 py-1.5 rounded text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800" title="Show only changed files">
+        <i class="fa-solid fa-filter"></i> Changes only
+      </button>
+    </div>
+    <!-- Stats -->
+    <button id="statsBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-transparent hover:border-zinc-800">
+      <i class="fa-solid fa-chart-bar"></i> Stats
+    </button>
+    <!-- Reset -->
+    <button id="resetBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-zinc-400 hover:text-white hover:bg-zinc-900 transition border border-zinc-800">
+      <i class="fa-solid fa-rotate-left"></i> Reset
+    </button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<div class="flex-1 flex overflow-hidden relative">
+
+  <!-- SIDEBAR (diff file tree) -->
+  <div id="sidebar" class="bg-black flex flex-col border-r border-zinc-900 min-w-[200px]" style="width:280px; flex-shrink:0;">
+
+    <!-- Search -->
+    <div class="p-2 border-b border-zinc-900">
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-zinc-600 text-[11px]"></i>
+        <input type="text" id="searchBox" placeholder="Filter files…" autocomplete="off"
+          class="w-full bg-zinc-950 border border-zinc-900 text-zinc-300 text-xs rounded pl-7 pr-2 py-1.5 focus:outline-none focus:border-zinc-700 placeholder-zinc-700 font-mono transition">
+      </div>
+    </div>
+
+    <!-- Filter row -->
+    <div id="filterRow" class="hidden px-2 py-1.5 border-b border-zinc-900 flex items-center gap-1 flex-wrap">
+      <button data-filter="all"      class="filter-tab active px-2 py-0.5 text-[10px] font-mono text-zinc-500 hover:text-white transition border-b-2 border-transparent">ALL</button>
+      <button data-filter="modified" class="filter-tab px-2 py-0.5 text-[10px] font-mono text-yellow-600 hover:text-yellow-300 transition border-b-2 border-transparent">MOD</button>
+      <button data-filter="added"    class="filter-tab px-2 py-0.5 text-[10px] font-mono text-green-600 hover:text-green-300 transition border-b-2 border-transparent">ADD</button>
+      <button data-filter="removed"  class="filter-tab px-2 py-0.5 text-[10px] font-mono text-red-600 hover:text-red-300 transition border-b-2 border-transparent">DEL</button>
+      <button data-filter="same"     class="filter-tab px-2 py-0.5 text-[10px] font-mono text-zinc-700 hover:text-zinc-400 transition border-b-2 border-transparent">SAME</button>
+      <div class="ml-auto text-[10px] font-mono text-zinc-700" id="filterCount"></div>
+    </div>
+
+    <!-- Tree meta -->
+    <div id="sidebarMeta" class="hidden px-3 py-1.5 flex items-center justify-between border-b border-zinc-900">
+      <span id="fileCountLabel" class="text-[10px] text-zinc-600 font-mono"></span>
+      <button id="collapseAllBtn" class="text-[10px] text-zinc-600 hover:text-zinc-400 transition">collapse</button>
+    </div>
+
+    <!-- Tree -->
+    <div id="fileTree" class="flex-1 overflow-auto py-1 px-1" tabindex="0">
+      <!-- Welcome / upload zone for when nothing loaded -->
+      <div id="treePlaceholder" class="flex flex-col h-full gap-3 p-3 pt-4">
+        <!-- Package A -->
+        <div id="dropZoneA" class="drop-zone flex-1 border border-dashed border-zinc-800 rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition hover:border-zinc-600 min-h-[90px]" data-side="A">
+          <div class="w-8 h-8 bg-zinc-950 rounded-lg flex items-center justify-center">
+            <i class="fa-solid fa-puzzle-piece text-sm text-zinc-600"></i>
+          </div>
+          <div class="text-center">
+            <p class="text-[11px] text-zinc-500 font-semibold">Package A</p>
+            <p class="text-[10px] text-zinc-700 font-mono">Old / Base</p>
+          </div>
+          <input type="file" id="crxInputA" accept=".crx" class="hidden">
+        </div>
+
+        <div class="flex items-center gap-2 px-2">
+          <div class="flex-1 h-px bg-zinc-900"></div>
+          <i class="fa-solid fa-arrow-down text-zinc-800 text-[10px]"></i>
+          <div class="flex-1 h-px bg-zinc-900"></div>
+        </div>
+
+        <!-- Package B -->
+        <div id="dropZoneB" class="drop-zone flex-1 border border-dashed border-zinc-800 rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition hover:border-zinc-600 min-h-[90px]" data-side="B">
+          <div class="w-8 h-8 bg-zinc-950 rounded-lg flex items-center justify-center">
+            <i class="fa-solid fa-puzzle-piece text-sm text-zinc-600"></i>
+          </div>
+          <div class="text-center">
+            <p class="text-[11px] text-zinc-500 font-semibold">Package B</p>
+            <p class="text-[10px] text-zinc-700 font-mono">New / Changed</p>
+          </div>
+          <input type="file" id="crxInputB" accept=".crx" class="hidden">
+        </div>
+
+        <button id="heroDiffBtn" class="hidden w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-code-compare"></i> Compare Packages
+        </button>
+      </div>
+
+      <!-- Populated diff tree -->
+      <div id="diffTree" class="hidden py-1"></div>
+    </div>
+
+    <!-- File status info panel -->
+    <div id="fileStatusPanel" class="hidden px-3 py-2 bg-zinc-950 border-t border-zinc-900 text-[10px] font-mono space-y-1">
+      <div class="flex justify-between"><span class="text-zinc-700">STATUS</span><span id="infoStatus" class="font-semibold"></span></div>
+      <div class="flex justify-between"><span class="text-zinc-700">SIZE A</span><span id="infoSizeA" class="text-zinc-400"></span></div>
+      <div class="flex justify-between"><span class="text-zinc-700">SIZE B</span><span id="infoSizeB" class="text-zinc-400"></span></div>
+      <div class="flex justify-between"><span class="text-zinc-700">LINES</span><span id="infoLines" class="text-zinc-400"></span></div>
+    </div>
+  </div>
+
+  <!-- Resize handle -->
+  <div id="resizeHandle" class="resize-handle bg-zinc-900 hover:bg-blue-600 transition-colors"></div>
+
+  <!-- MAIN CONTENT AREA -->
+  <div id="mainContent" class="flex flex-col flex-1 overflow-hidden min-w-[300px] bg-black">
+
+    <!-- Toolbar -->
+    <div id="editorToolbar" class="hidden h-9 border-b border-zinc-900 bg-black flex items-center justify-between px-3 text-[11px] flex-shrink-0">
+      <div class="flex items-center gap-2 overflow-hidden min-w-0">
+        <span id="activeStatusBadge" class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold flex-shrink-0"></span>
+        <span id="filePathDisplay" class="font-mono truncate text-zinc-500 text-[11px]"></span>
+      </div>
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <button id="prevChangeBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition text-[10px]" title="Previous change">
+          <i class="fa-solid fa-chevron-up"></i>
+        </button>
+        <button id="nextChangeBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition text-[10px]" title="Next change">
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+        <div id="changeCounter" class="hidden text-[10px] font-mono text-zinc-600 px-1"></div>
+        <div class="w-px h-4 bg-zinc-900 mx-1 hidden" id="changeSep"></div>
+        <button id="formatBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-yellow-700 hover:text-yellow-400 hover:bg-zinc-900 transition text-[10px]">
+          <i class="fa-solid fa-wand-magic-sparkles text-[9px]"></i> Format
+        </button>
+        <button id="wrapBtn" class="flex items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition text-[10px]" title="Toggle word wrap">
+          <i class="fa-solid fa-text-width text-[9px]"></i> Wrap
+        </button>
+        <button id="copyDiffBtn" class="hidden items-center gap-1 px-2 py-1 rounded text-zinc-500 hover:text-white hover:bg-zinc-900 transition text-[10px]">
+          <i class="fa-regular fa-copy text-[9px]"></i> Copy Patch
+        </button>
+      </div>
+    </div>
+
+    <!-- Viewer Container -->
+    <div id="viewerContainer" class="flex-1 relative overflow-hidden">
+
+      <!-- Welcome screen -->
+      <div id="welcomeScreen" class="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black">
+        <div class="flex flex-col items-center text-center max-w-sm">
+          <div class="w-16 h-16 bg-zinc-950 border border-zinc-900 rounded-2xl flex items-center justify-center mb-5">
+            <i class="fa-solid fa-code-compare text-3xl text-blue-500"></i>
+          </div>
+          <h2 class="text-base font-semibold text-white mb-1.5">modcore Source Diff</h2>
+          <p class="text-xs text-zinc-600 leading-relaxed mb-1">Upload two <span class="font-mono">.crx</span> packages to compare them.</p>
+          <p class="text-xs text-zinc-700 leading-relaxed mb-5">See exactly what changed between versions - file by file.</p>
+          <div class="flex items-center gap-2 text-[10px] font-mono text-zinc-700">
+            <span class="px-2 py-1 rounded bg-zinc-950 border border-zinc-900">Added</span>
+            <span class="px-2 py-1 rounded bg-zinc-950 border border-zinc-900 text-red-900">Removed</span>
+            <span class="px-2 py-1 rounded bg-zinc-950 border border-zinc-900 text-yellow-900">Modified</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- No file selected -->
+      <div id="noFileSelected" class="hidden absolute inset-0 flex flex-col items-center justify-center z-10 bg-black">
+        <i class="fa-solid fa-code-compare text-4xl text-zinc-800 mb-3"></i>
+        <p class="text-sm text-zinc-600">Select a file to diff</p>
+        <p class="text-xs text-zinc-800 mt-1 font-mono">← pick from the tree</p>
+      </div>
+
+      <!-- Monaco Diff Editor (side-by-side & inline) -->
+      <div id="monacoDiffHost" class="hidden h-full w-full"></div>
+
+      <!-- Media diff viewer -->
+      <div id="mediaDiffViewer" class="hidden h-full flex flex-col overflow-hidden">
+        <!-- Header with labels -->
+        <div class="flex border-b border-zinc-900 text-[10px] font-mono flex-shrink-0">
+          <div class="flex-1 px-4 py-1.5 text-zinc-600 border-r border-zinc-900">A - <span id="mediaLabelA" class="text-zinc-400"></span></div>
+          <div class="flex-1 px-4 py-1.5 text-zinc-600">B - <span id="mediaLabelB" class="text-zinc-400"></span></div>
+        </div>
+        <div class="flex flex-1 overflow-hidden">
+          <!-- Left media -->
+          <div class="flex-1 flex flex-col items-center justify-center border-r border-zinc-900 overflow-hidden relative checker-bg">
+            <div id="mediaContainerLeft" class="flex items-center justify-center" style="transform-origin:center;"></div>
+            <div id="mediaSizeLeft" class="absolute bottom-3 left-3 text-[10px] font-mono text-zinc-600 bg-black/50 px-2 py-1 rounded"></div>
+          </div>
+          <!-- Right media -->
+          <div class="flex-1 flex flex-col items-center justify-center overflow-hidden relative checker-bg">
+            <div id="mediaContainerRight" class="flex items-center justify-center" style="transform-origin:center;"></div>
+            <div id="mediaSizeRight" class="absolute bottom-3 right-3 text-[10px] font-mono text-zinc-600 bg-black/50 px-2 py-1 rounded"></div>
+          </div>
+        </div>
+        <!-- Zoom bar -->
+        <div class="flex-shrink-0 border-t border-zinc-900 flex items-center justify-center gap-2 px-4 py-1.5">
+          <button id="mediaZoomOut" class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs"><i class="fa-solid fa-minus"></i></button>
+          <span id="mediaZoomDisplay" class="text-[10px] font-mono text-zinc-500 w-10 text-center">100%</span>
+          <button id="mediaZoomIn"  class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs"><i class="fa-solid fa-plus"></i></button>
+          <div class="w-px h-3 bg-zinc-800 mx-1"></div>
+          <button id="mediaZoomReset" class="w-6 h-6 rounded-full hover:bg-zinc-800 text-zinc-400 flex items-center justify-center text-xs"><i class="fa-solid fa-compress"></i></button>
+        </div>
+      </div>
+
+      <!-- Binary diff viewer -->
+      <div id="binaryDiffViewer" class="hidden h-full flex flex-col">
+        <div class="flex border-b border-zinc-900 text-[10px] font-mono flex-shrink-0">
+          <div class="flex-1 px-4 py-1.5 text-zinc-600 border-r border-zinc-900">A</div>
+          <div class="flex-1 px-4 py-1.5 text-zinc-600">B</div>
+        </div>
+        <div class="flex flex-1 overflow-hidden">
+          <div class="flex-1 flex flex-col items-center justify-center border-r border-zinc-900">
+            <i id="binaryIconLeft" class="fa-solid fa-file text-2xl text-zinc-700 mb-2"></i>
+            <p id="binaryNameLeft" class="text-xs font-mono text-zinc-500"></p>
+            <p id="binarySizeLeft" class="text-[10px] font-mono text-zinc-700 mt-1"></p>
+          </div>
+          <div class="flex-1 flex flex-col items-center justify-center">
+            <i id="binaryIconRight" class="fa-solid fa-file text-2xl text-zinc-700 mb-2"></i>
+            <p id="binaryNameRight" class="text-xs font-mono text-zinc-500"></p>
+            <p id="binarySizeRight" class="text-[10px] font-mono text-zinc-700 mt-1"></p>
+          </div>
+        </div>
+        <div class="border-t border-zinc-900 px-4 py-2 flex-shrink-0">
+          <p id="binaryDiffMsg" class="text-[11px] font-mono text-zinc-600"></p>
+        </div>
+      </div>
+
+      <!-- Only in A/B viewer (file added or removed) -->
+      <div id="singleFileViewer" class="hidden h-full flex flex-col overflow-hidden">
+        <div id="singleFileHeader" class="px-4 py-2 border-b border-zinc-900 flex-shrink-0 text-[10px] font-mono text-zinc-500"></div>
+        <div id="singleMonacoHost" class="flex-1"></div>
+      </div>
+
+      <!-- Stats Panel -->
+      <div id="statsPanel" class="hidden h-full overflow-auto bg-black p-6 panel-fade">
+        <h2 class="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-chart-bar text-blue-500 text-xs"></i> Diff Statistics
+        </h2>
+        <div id="statsContent" class="space-y-4"></div>
+      </div>
+
+    </div>
+
+    <!-- Status Bar -->
+    <div class="h-6 bg-black border-t border-zinc-900 flex justify-between items-center px-3 text-[10px] text-zinc-700 flex-shrink-0 font-mono">
+      <div class="flex items-center gap-2">
+        <div id="statusDot" class="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
+        <span id="statusMsg">Ready</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span id="diffSummaryBar" class="hidden items-center gap-2">
+          <span id="diffAddedCount" class="text-green-700"></span>
+          <span id="diffRemovedCount" class="text-red-700"></span>
+          <span id="diffModifiedCount" class="text-yellow-700"></span>
+        </span>
+        <span id="langDisplay"></span>
+        <span id="cursorInfo">Ln 1, Col 1</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-html.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-css.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+<script src="diff-viewer.js"></script>
+</body>
+</html>
