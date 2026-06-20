@@ -648,6 +648,11 @@ export async function loadFile(file) {
 
     if (state.fileMap['manifest.json']) openFile('manifest.json');
 
+    // Rebuild modAI context with full manifest
+    import('./ai/ai.js').then(m => {
+      if (m.buildExtensionContext) m.buildExtensionContext();
+    }).catch(() => {});
+
   } catch (err) {
     showToast('Failed to parse archive');
     setStatus('Error');
