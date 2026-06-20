@@ -1,6 +1,7 @@
 /**
  * ai/ai.js
- * Privacy-first local AI assistant using WebLLM (WebGPU).
+ * modAI — Privacy-first local AI assistant for extension inspection.
+ * Runs entirely in-browser via WebLLM (WebGPU). No data leaves your device.
  */
 
 import { state } from '../state.js';
@@ -47,7 +48,6 @@ let aiReady = false;
 let loading = false;
 let isGenerating = false;
 let currentModelKey = null;
-let extensionContext = '';
 
 let chatHistory = [];
 let messageIdCounter = 0;
@@ -65,9 +65,7 @@ export function initAI() {
   el.aiLoadBtn.addEventListener('click', () => {
     if (el.aiLoadBtn._clearOnRetry) {
       el.aiLoadBtn._clearOnRetry = false;
-      clearModelCache().then(() => {
-        setTimeout(handleLoadModel, 300);
-      });
+      clearModelCache().then(() => setTimeout(handleLoadModel, 300));
       return;
     }
     handleLoadModel();
@@ -79,10 +77,11 @@ export function initAI() {
   el.aiUseFileBtn.addEventListener('click', attachCurrentFile);
   el.aiClearChat.addEventListener('click', clearChat);
   el.aiClearContext.addEventListener('click', detachFile);
+  el.closeAiPanel.addEventListener('click', () => el.aiPanel.classList.add('translate-x-full'));
 
-  const clearCacheBtn = document.getElementById('aiClearCacheBtn');
-  if (clearCacheBtn) clearCacheBtn.addEventListener('click', clearModelCache);
-  el.closeAiPanel.addEventListener('click', disposeModel);
+  // Reset cache button
+  const resetCacheBtn = document.getElementById('aiResetCacheBtn');
+  if (resetCacheBtn) resetCacheBtn.addEventListener('click', clearModelCache);
 }
 
 function buildModelSelect() {
@@ -95,23 +94,47 @@ function buildModelSelect() {
   });
 }
 
-// ── Extension Context (minimal, includes currently viewing file) ───────────────
+// ── Context Building (Full Manifest + File Inventory) ─────────────────────────
 
 export function buildExtensionContext() {
   if (!state.zip || !state.manifestData) {
-    extensionContext = '';
-    return;
+    return 'No extension loaded.';
   }
+
   const m = state.manifestData;
-  const perms = [...(m.permissions || []), ...(m.host_permissions || [])].slice(0, 6);
-  extensionContext = `Extension: ${m.name || 'Unknown'} v${m.version || '?'}, manifest v${m.manifest_version || '?'}. Perms: ${perms.join(', ') || 'none'}.`;
+  const files = Object.keys(state.fileMap).sort();
+  const fileList = files.slice(0, 200).join('\n');
+  const moreFiles = files.length > 200 ? `\n... and ${files.length - 200} more files.` : '';
+
+  // Full manifest JSON (truncated only if absolutely necessary)
+  let manifestStr = JSON.stringify(m, null, 2);
+  if (manifestStr.length > 6000) {
+    manifestStr = manifestStr.substring(0, 6000) + '\n/* ... manifest truncated ... */';
+  }
+
+  return `You are modAI, a security and inspection assistant for Chrome extensions. You analyze extensions for security risks, code quality, and suspicious patterns. You do NOT write new code or suggest modifications to the extension. You only inspect, analyze, and explain what already exists.
+
+EXTENSION MANIFEST (manifest.json):
+${manifestStr}
+
+FILE INVENTORY (${files.length} total files):
+${fileList}${moreFiles}
+
+CURRENTLY VIEWING: ${state.activeTabPath || 'No file open'}
+
+RULES:
+- You are an inspector, not a builder. Never generate new code for the extension.
+- If asked about a file that exists in the inventory but is NOT attached, say: "I can see that file exists in the extension, but you haven't attached it. Click 'Attach file' to let me read its contents."
+- If asked about a file that does NOT exist in the inventory, say: "That file doesn't appear to exist in this extension."
+- Be concise. Use markdown for formatting. Use code blocks for code references.`;
 }
 
-function getCurrentlyViewing() {
-  if (state.activeTabPath) {
-    return `Currently viewing: ${state.activeTabPath} (content not attached).`;
-  }
-  return 'No file currently open.';
+function getAttachedFileContext() {
+  if (!attachedFile) return '';
+  return `\n\nATTACHED FILE (${attachedFile.path}):
+\`\`\`
+${attachedFile.content}
+\`\`\``;
 }
 
 // ── Memory Management ─────────────────────────────────────────────────────────
@@ -137,7 +160,6 @@ function disposeModel() {
   }
   if (el.aiLoadProgress) el.aiLoadProgress.classList.add('hidden');
   setInputEnabled(true);
-  setStatus('AI disposed');
 }
 
 export async function clearModelCache() {
@@ -151,9 +173,12 @@ export async function clearModelCache() {
         window.indexedDB.deleteDatabase(db.name);
       }
     }
-    showToast('Cache cleared');
+    for (const key of Object.keys(localStorage)) {
+      if (key.includes('webllm') || key.includes('mlc')) localStorage.removeItem(key);
+    }
+    showToast('Model cache cleared');
   } catch (err) {
-    showToast('Cache clear failed');
+    showToast('Clear failed: ' + (err?.message || 'unknown'));
   }
 }
 
@@ -189,7 +214,12 @@ async function handleLoadModel() {
     setText('aiLoadStatus', `Downloading ${modelKey}…`);
     setText('aiModelBadge', `${modelKey}`);
 
+    const appConfig = webllmModule.prebuiltAppConfig
+      ? { ...webllmModule.prebuiltAppConfig, cacheBackend: 'indexeddb' }
+      : { cacheBackend: 'indexeddb' };
+
     engine = await CreateMLCEngine(modelCfg.id, {
+      appConfig,
       initProgressCallback: (p) => {
         const pct = Math.round(p.progress * 100);
         setText('aiLoadStatus', p.text || 'Loading…');
@@ -203,8 +233,7 @@ async function handleLoadModel() {
     el.aiChatScreen.classList.remove('hidden');
     el.aiChatScreen.classList.add('flex');
     el.aiModelBadge.classList.remove('hidden');
-    buildExtensionContext();
-    addSystemMessage(`${modelKey} ready · ${modelCfg.maxTokens} tokens context`);
+    addSystemMessage(`${modelKey} ready · Ask me anything about this extension`);
     showToast(`${modelKey} ready`);
   } catch (err) {
     console.error(err);
@@ -212,21 +241,20 @@ async function handleLoadModel() {
     let friendly = msg;
     let action = 'Retry';
 
-    if (msg.includes('Cache') || msg.includes('cache')) {
-      friendly = 'Model download failed. The browser cache may be corrupted or storage is full.';
-      action = 'Clear Cache & Retry';
-      // Auto-clear on next click
+    if (msg.includes('Cache') || msg.includes('cache') || msg.includes('Failed to execute')) {
+      friendly = 'Model download failed. Browser storage may be full or restricted. Try clearing storage or reloading.';
+      action = 'Clear Storage & Retry';
       el.aiLoadBtn._clearOnRetry = true;
     } else if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) {
-      friendly = 'Network error while downloading the model. Check your connection and try again.';
+      friendly = 'Network error while downloading the model. Check your connection.';
     } else if (msg.includes('WebGPU') || msg.includes('webgpu') || msg.includes('GPU')) {
-      friendly = 'WebGPU is not available or enabled in this browser. Enable it in chrome://flags or try a different browser.';
+      friendly = 'WebGPU is not available. Enable it in chrome://flags or use Chrome/Edge 113+.';
       action = 'Dismiss';
     } else if (msg.includes('out of memory') || msg.includes('OOM') || msg.includes('Memory')) {
-      friendly = `The model is too large for this device (${modelCfg.size}). Try a smaller model like Llama-3.2-1B.`;
+      friendly = `Model too large for this device (${modelCfg.size}). Try a smaller model.`;
       action = 'Dismiss';
     } else if (msg.includes('import') || msg.includes('module')) {
-      friendly = 'Failed to load the WebLLM runtime. Check your internet connection or try again later.';
+      friendly = 'Failed to load WebLLM runtime. Check your internet connection.';
     }
 
     setText('aiLoadStatus', friendly);
@@ -241,7 +269,6 @@ async function handleLoadModel() {
 // ── Token Budget with Sliding Window ───────────────────────────────────────────
 
 function estimateTokens(text) {
-  // Adjusted to 2.5 because code contains dense structural symbols and punctuation
   return Math.ceil(text.length / 2.5);
 }
 
@@ -251,44 +278,39 @@ function buildMessages() {
   const reserve = 2048;
   let budget = maxCtx - reserve;
 
-  const sys = `You are a security-focused assistant analyzing Chrome extensions via modcore Source. ${extensionContext} ${getCurrentlyViewing()} Be concise. Use markdown code blocks for code.`;
+  const sys = buildExtensionContext();
   budget -= estimateTokens(sys);
 
   const messages = [{ role: 'system', content: sys }];
 
-  // Add file attachment if present (max 1)
+  // Attached file context
   if (attachedFile) {
-    let fileMsg = `Attached file \`${attachedFile.path}\`:\n\`\`\`\n${attachedFile.content}\n\`\`\``;
+    let fileMsg = `ATTACHED FILE (${attachedFile.path}):
+\`\`\`
+${attachedFile.content}
+\`\`\``;
     let ft = estimateTokens(fileMsg);
-    
-    // If the file exceeds 50% of the budget, dynamically trim it instead of ignoring it entirely
     if (ft >= budget * 0.5) {
-      const allowedTokens = Math.floor(budget * 0.5);
-      const allowedChars = Math.floor(allowedTokens * 2.5); // Derived from our 2.5 token heuristic
-      
-      const truncatedContent = attachedFile.content.substring(0, allowedChars) + 
-        '\n\n/* … truncated further to fit within local model context window … */';
-      
-      fileMsg = `Attached file \`${attachedFile.path}\` (Partially Truncated):\n\`\`\`\n${truncatedContent}\n\`\`\``;
+      const allowedChars = Math.floor(Math.floor(budget * 0.5) * 2.5);
+      const truncated = attachedFile.content.substring(0, allowedChars) +
+        '\n/* … truncated to fit context window … */';
+      fileMsg = `ATTACHED FILE (${attachedFile.path}, truncated):
+\`\`\`
+${truncated}
+\`\`\``;
       ft = estimateTokens(fileMsg);
-      
-      // Defers toast slightly so it doesn't interrupt the generation sequence UI
-      setTimeout(() => showToast('Context automatically optimized to fit model limits.'), 50);
+      setTimeout(() => showToast('File truncated to fit model limits'), 50);
     }
-
     budget -= ft;
     messages.push({ role: 'user', content: fileMsg });
   }
 
-  // Sliding window: add history newest-first, drop oldest if over budget
+  // Sliding window history
   const history = [];
   for (let i = chatHistory.length - 1; i >= 0; i--) {
     const msg = chatHistory[i];
     const t = estimateTokens(msg.content);
-    if (budget - t < 0) {
-      // Drop oldest messages to make room (sliding window)
-      break;
-    }
+    if (budget - t < 0) break;
     budget -= t;
     history.unshift({ role: msg.role, content: msg.content });
   }
@@ -329,7 +351,7 @@ async function generateResponse() {
   try {
     const chunks = await engine.chat.completions.create({
       messages,
-      temperature: 0.7,
+      temperature: 0.5,
       max_tokens: 2048,
       stream: true,
     });
@@ -348,7 +370,7 @@ async function generateResponse() {
     console.error(err);
     await flushRender();
     const errText = `Error: ${err.message}`;
-    renderMarkdown(currentAssistantElement, errText);
+    renderMarkdown(currentAssistantElement, errText, true);
     chatHistory.push({ id: msgId, role: 'assistant', content: errText });
   } finally {
     isGenerating = false;
@@ -360,48 +382,54 @@ async function generateResponse() {
   }
 }
 
-// Batched rendering using requestAnimationFrame
 function scheduleRender() {
   if (pendingRender) return;
   pendingRender = true;
   requestAnimationFrame(() => {
     if (currentAssistantElement && currentAssistantText) {
-      renderMarkdown(currentAssistantElement, currentAssistantText);
+      renderMarkdown(currentAssistantElement, currentAssistantText, false);
     }
     pendingRender = false;
   });
 }
 
 async function flushRender() {
-  if (pendingRender) {
-    await new Promise(r => requestAnimationFrame(r));
-  }
+  if (pendingRender) await new Promise(r => requestAnimationFrame(r));
   if (currentAssistantElement && currentAssistantText) {
-    renderMarkdown(currentAssistantElement, currentAssistantText);
+    renderMarkdown(currentAssistantElement, currentAssistantText, true);
   }
 }
 
-// ── Markdown Rendering (marked.js with custom renderer, no spacing issues) ──────
+// ── Markdown Rendering (Monaco for code, proper formatting) ───────────────────
 
-function renderMarkdown(element, text) {
+function renderMarkdown(element, text, isFinal) {
   try {
-    // Create a custom renderer that avoids excessive paragraph margins
     const renderer = new marked.Renderer();
 
-    // Override paragraph rendering to use div with no margin
     renderer.paragraph = (token) => {
-      return `<div class="text-mc-text2 leading-relaxed mb-1">${token.text}</div>`;
+      return `<p class="text-mc-text2 leading-relaxed mb-2">${token.text}</p>`;
     };
 
-    // Override text rendering to handle inline elements
-    renderer.text = (token) => {
-      return token.text;
-    };
+    renderer.text = (token) => token.text;
 
-    // Override code block rendering
+    // Code blocks with Monaco integration
     renderer.code = (token) => {
       const lang = token.lang || 'text';
       const code = token.text;
+      const blockId = `code-${Math.random().toString(36).slice(2, 9)}`;
+
+      // Use Monaco if available for final renders, otherwise pre
+      if (isFinal && typeof monaco !== 'undefined') {
+        setTimeout(() => initMonacoBlock(blockId, code, lang), 0);
+        return `<div class="my-2 rounded-lg border border-mc-border overflow-hidden">
+          <div class="flex items-center justify-between px-3 py-1.5 bg-mc-bg3 border-b border-mc-border">
+            <span class="text-[9px] mono text-mc-text2 uppercase">${lang}</span>
+            <button class="text-[9px] text-mc-text2 hover:text-mc-text transition copy-code-btn" data-code="${encodeURIComponent(code)}">Copy</button>
+          </div>
+          <div id="${blockId}" class="bg-mc-bg2" style="min-height:60px;max-height:400px;"></div>
+        </div>`;
+      }
+
       return `<div class="my-2 rounded-lg border border-mc-border overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 bg-mc-bg3 border-b border-mc-border">
           <span class="text-[9px] mono text-mc-text2 uppercase">${lang}</span>
@@ -411,64 +439,63 @@ function renderMarkdown(element, text) {
       </div>`;
     };
 
-    // Override inline code
     renderer.codespan = (token) => {
-      return `<code class="bg-mc-bg2 px-1 py-0.5 rounded text-[10px] mono text-mc-text">${token.text}</code>`;
+      return `<code class="bg-mc-bg2 px-1 py-0.5 rounded text-[10px] mono text-mc-text border border-mc-border">${token.text}</code>`;
     };
 
-    // Override heading rendering
     renderer.heading = (token) => {
       const sizes = { 1: 'text-sm', 2: 'text-xs', 3: 'text-[11px]', 4: 'text-[11px]', 5: 'text-[10px]', 6: 'text-[10px]' };
       const size = sizes[token.depth] || 'text-[11px]';
       return `<h${token.depth} class="text-mc-text font-semibold mt-3 mb-1 ${size}">${token.text}</h${token.depth}>`;
     };
 
-    // Override list rendering
     renderer.list = (token) => {
       const tag = token.ordered ? 'ol' : 'ul';
-      return `<${tag} class="pl-4 my-2 space-y-1">${token.items.map(item => `<li class="text-mc-text2">${item.text}</li>`).join('')}</${tag}>`;
+      const start = token.start ? ` start="${token.start}"` : '';
+      return `<${tag}${start} class="pl-4 my-2 space-y-1">${token.items.map(item => `<li class="text-mc-text2">${item.text}</li>`).join('')}</${tag}>`;
     };
 
-    // Override blockquote
     renderer.blockquote = (token) => {
       return `<blockquote class="border-l-2 border-mc-border pl-3 my-2 text-mc-text2 italic">${token.text}</blockquote>`;
     };
 
-    // Override link
     renderer.link = (token) => {
       return `<a href="${token.href}" target="_blank" rel="noopener noreferrer" class="text-mc-text hover:underline">${token.text}</a>`;
     };
 
-    // Override strong
     renderer.strong = (token) => {
       return `<strong class="text-mc-text font-semibold">${token.text}</strong>`;
     };
 
-    // Override em
     renderer.em = (token) => {
       return `<em class="italic text-mc-text2">${token.text}</em>`;
     };
 
-    // Override hr
+    renderer.del = (token) => {
+      return `<del class="text-mc-text2 opacity-60">${token.text}</del>`;
+    };
+
     renderer.hr = () => {
       return `<hr class="border-mc-border my-3">`;
     };
 
-    // Override table
     renderer.table = (token) => {
       const header = token.header.map(h => `<th class="px-2 py-1 border border-mc-border text-mc-text bg-mc-bg2 font-semibold text-[11px]">${h.text}</th>`).join('');
       const rows = token.rows.map(row => `<tr>${row.map(cell => `<td class="px-2 py-1 border border-mc-border text-mc-text2 text-[11px]">${cell.text}</td>`).join('')}</tr>`).join('');
       return `<table class="w-full text-[11px] border border-mc-border rounded-lg overflow-hidden my-2"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
     };
 
+    // Better list item rendering
+    renderer.listitem = (token) => {
+      return `<li class="text-mc-text2">${token.text}</li>`;
+    };
+
     marked.use({ renderer });
 
     const html = marked.parse(text, { breaks: true, gfm: true });
-    
-    // Sanitize the HTML string to neutralize code-injection/XSS attacks from scanned source files
     element.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
 
-    // Attach copy handlers to code blocks
+    // Attach copy handlers
     element.querySelectorAll('.copy-code-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const code = decodeURIComponent(btn.dataset.code);
@@ -477,9 +504,43 @@ function renderMarkdown(element, text) {
     });
 
   } catch (err) {
-    // Fallback to plain text
     element.textContent = text;
   }
+}
+
+function initMonacoBlock(id, code, lang) {
+  const container = document.getElementById(id);
+  if (!container || !monaco) return;
+
+  const mappedLang = lang === 'js' ? 'javascript' : lang === 'ts' ? 'typescript' : lang;
+  const model = monaco.editor.createModel(code, mappedLang);
+  const editor = monaco.editor.create(container, {
+    model,
+    theme: 'crx-dark',
+    readOnly: true,
+    fontSize: 11,
+    fontFamily: "'JetBrains Mono', monospace",
+    lineNumbers: 'off',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    automaticLayout: true,
+    folding: false,
+    renderLineHighlight: 'none',
+    contextmenu: false,
+    padding: { top: 4, bottom: 4 },
+    scrollbar: { vertical: 'hidden', horizontal: 'auto' },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    overviewRulerBorder: false,
+  });
+
+  // Auto-height up to max
+  const lineCount = model.getLineCount();
+  const lineHeight = 17;
+  const padding = 8;
+  const desiredHeight = Math.min(lineCount * lineHeight + padding, 400);
+  container.style.height = desiredHeight + 'px';
 }
 
 function escapeHtml(text) {
@@ -488,7 +549,7 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// ── File Attachment (max 1, optimized) ──────────────────────────────────────────
+// ── File Attachment ───────────────────────────────────────────────────────────
 
 async function attachCurrentFile() {
   if (!state.activeTabPath) { showToast('No file open'); return; }
@@ -504,12 +565,13 @@ async function attachCurrentFile() {
     catch { showToast('Cannot read file'); return; }
   }
 
-  // Smart truncation: keep first and last parts for large files
   const maxChars = 8000;
   let displayContent = content;
   if (content.length > maxChars) {
     const half = Math.floor(maxChars / 2);
-    displayContent = content.substring(0, half) + '\n\n/* … truncated … */\n\n' + content.substring(content.length - half);
+    displayContent = content.substring(0, half) +
+      '\n\n/* … truncated … */\n\n' +
+      content.substring(content.length - half);
   }
 
   attachedFile = {
@@ -547,7 +609,7 @@ function updateAttachUI() {
 function setInputEnabled(enabled) {
   el.aiInput.disabled = !enabled;
   el.aiSendBtn.disabled = !enabled;
-  el.aiInput.placeholder = enabled ? 'Ask about this extension…' : 'AI is responding…';
+  el.aiInput.placeholder = enabled ? 'Ask modAI about this extension…' : 'modAI is thinking…';
 }
 
 function clearChat() {
@@ -556,12 +618,12 @@ function clearChat() {
   attachedFile = null;
   updateAttachUI();
   clearEl(el.aiMessages);
-  addSystemMessage('Chat cleared.');
+  addSystemMessage('Chat cleared. Ready for new questions.');
 }
 
 function addSystemMessage(text) {
   const div = createEl('div', {
-    className: 'text-[10px] text-mc-text2 text-center py-1',
+    className: 'text-[10px] text-mc-text2 text-center py-2',
     textContent: text
   });
   el.aiMessages.appendChild(div);
@@ -571,28 +633,26 @@ function addSystemMessage(text) {
 function appendMessage(role, text, msgId) {
   const isUser = role === 'user';
   const wrapper = createEl('div', {
-    className: `flex ${isUser ? 'justify-end' : 'justify-start'}`,
+    className: `flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`,
     attrs: { 'data-msg-id': msgId }
   });
-  const bubble = createEl('div', {
-    className: `max-w-[90%] rounded-lg px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap break-words ${isUser ? 'ai-msg-user text-mc-text' : 'ai-msg-ai text-mc-text2'}`,
+
+  const inner = createEl('div', {
+    className: `max-w-[92%] ${isUser ? 'ai-msg-user' : 'ai-msg-ai'} rounded-std px-4 py-3 text-[12px] leading-relaxed`,
   });
+
   if (isUser) {
-    bubble.textContent = text;
+    inner.innerHTML = `<p class="text-mc-text whitespace-pre-wrap">${escapeHtml(text)}</p>`;
   }
-  wrapper.appendChild(bubble);
+
+  wrapper.appendChild(inner);
   el.aiMessages.appendChild(wrapper);
   scrollToBottom();
-  return bubble;
+  return inner;
 }
 
 function scrollToBottom() {
   requestAnimationFrame(() => {
     el.aiMessages.scrollTop = el.aiMessages.scrollHeight;
   });
-}
-
-function setStatus(msg) {
-  const s = document.getElementById('statusMsg');
-  if (s) s.textContent = msg;
 }
