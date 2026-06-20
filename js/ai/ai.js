@@ -1,6 +1,6 @@
 /**
  * ai/ai.js
- * modAI — Privacy-first local AI assistant for extension inspection.
+ * modAI — Privacy-first local AI assistant for Chrome extension inspection.
  * Runs entirely in-browser via WebLLM (WebGPU). No data leaves your device.
  */
 
@@ -55,6 +55,7 @@ let currentAssistantElement = null;
 let currentAssistantText = '';
 let pendingRender = false;
 let attachedFile = null;
+let pendingAttachmentRequest = null;  // For "analyze [file]" pattern
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,6 @@ export function initAI() {
   el.aiClearContext.addEventListener('click', detachFile);
   el.closeAiPanel.addEventListener('click', () => el.aiPanel.classList.add('translate-x-full'));
 
-  // Reset cache button
   const resetCacheBtn = document.getElementById('aiResetCacheBtn');
   if (resetCacheBtn) resetCacheBtn.addEventListener('click', clearModelCache);
 }
@@ -94,7 +94,7 @@ function buildModelSelect() {
   });
 }
 
-// ── Context Building (Full Manifest + File Inventory) ─────────────────────────
+// ── Context Building (Full Manifest + File Inventory + Permissions) ───────────
 
 export function buildExtensionContext() {
   if (!state.zip || !state.manifestData) {
@@ -103,38 +103,243 @@ export function buildExtensionContext() {
 
   const m = state.manifestData;
   const files = Object.keys(state.fileMap).sort();
-  const fileList = files.slice(0, 200).join('\n');
-  const moreFiles = files.length > 200 ? `\n... and ${files.length - 200} more files.` : '';
 
-  // Full manifest JSON (truncated only if absolutely necessary)
+  // Build file tree structure for context
+  const fileTree = buildFileTreeContext(files);
+
+  // Full manifest JSON with compression for very large ones
   let manifestStr = JSON.stringify(m, null, 2);
-  if (manifestStr.length > 6000) {
-    manifestStr = manifestStr.substring(0, 6000) + '\n/* ... manifest truncated ... */';
+  let manifestNote = '';
+  if (manifestStr.length > 8000) {
+    manifestStr = compressManifest(m);
+    manifestNote = '\n[Note: Manifest was compressed to fit context window. Key fields preserved, verbose arrays truncated.]';
   }
 
-  return `You are modAI, a security and inspection assistant for Chrome extensions. You analyze extensions for security risks, code quality, and suspicious patterns. You do NOT write new code or suggest modifications to the extension. You only inspect, analyze, and explain what already exists.
+  // Permission analysis
+  const permAnalysis = analyzePermissions(m);
 
-EXTENSION MANIFEST (manifest.json):
+  // Content scripts summary
+  const csSummary = buildContentScriptsSummary(m);
+
+  // Background summary
+  const bgSummary = buildBackgroundSummary(m);
+
+  return `You are modAI, operating inside modcore Source (a Chrome extension inspector tool). Your job is to analyze, inspect, and explain extensions. You are NOT a code generator. You do NOT write new code. You do NOT suggest modifications. You only describe, analyze, and flag issues.
+
+YOUR UI (modAI Panel):
+You live in a slide-out panel on the right side of modcore Source. The panel has three states:
+  1. Consent screen: model selector dropdown, privacy notice, "Load Model" button, "Reset Cache" button (trash icon).
+  2. Loading screen: progress bar, status text, percentage counter.
+  3. Chat screen: message history (user bubbles on the right, your bubbles on the left), input textarea at the bottom with send button, "Attach current file" button, "Clear chat" button.
+When a file is attached, a context bar appears directly above the input showing the filename and character count. The user can detach it via an X button on that bar. The user opens modAI via the "modAI" button in the top toolbar (keyboard: Alt+A).
+
+INTERACTION RULES:
+- The user can attach ONE file at a time via the "Attach current file" button.
+- The user can also ask you to analyze a specific file by name (e.g., "analyze popup.js"). When this happens, you detect the file in the tree and ask permission to attach it via an inline prompt in the chat.
+- If the user asks about a file that exists but is not attached, tell them it exists and offer to read it. Do not guess the contents.
+- If the user asks about a file that does not exist in the tree, say so clearly.
+
+EXTENSION DATA:
+
+MANIFEST (manifest.json):${manifestNote}
 ${manifestStr}
 
-FILE INVENTORY (${files.length} total files):
-${fileList}${moreFiles}
+PERMISSION ANALYSIS:
+${permAnalysis}
 
-CURRENTLY VIEWING: ${state.activeTabPath || 'No file open'}
+CONTENT SCRIPTS:
+${csSummary}
 
-RULES:
-- You are an inspector, not a builder. Never generate new code for the extension.
-- If asked about a file that exists in the inventory but is NOT attached, say: "I can see that file exists in the extension, but you haven't attached it. Click 'Attach file' to let me read its contents."
-- If asked about a file that does NOT exist in the inventory, say: "That file doesn't appear to exist in this extension."
-- Be concise. Use markdown for formatting. Use code blocks for code references.`;
+BACKGROUND:
+${bgSummary}
+
+FILE TREE (${files.length} files):
+${fileTree}
+
+ANALYSIS RULES:
+1. NEVER write new code for the extension. Never suggest patches, rewrites, or improvements.
+2. If asked about a file that EXISTS in the tree but is NOT attached, say: "I can see that file in the extension, but it is not attached. Would you like me to read it?" — then STOP. Do not guess the contents.
+3. If asked about a file that does NOT exist, say: "That file does not appear in this extension."
+4. If the user says "analyze [filename]" or "look at [filename]" or similar, recognize the file from the tree and ask permission to attach it.
+5. Be concise. Use markdown. Use code blocks ONLY for quoting existing code, never for generating new code.
+6. Focus on: security risks, suspicious patterns, permission overreach, data exfiltration vectors, CSP weaknesses, and code quality issues.
+7. When quoting code, keep snippets short and relevant (under 20 lines).`;
+}
+
+function buildFileTreeContext(files) {
+  const tree = {};
+  files.forEach(path => {
+    const parts = path.split('/');
+    let node = tree;
+    parts.forEach((part, i) => {
+      const isFile = i === parts.length - 1;
+      if (!node[part]) {
+        node[part] = isFile ? null : {};
+      }
+      if (!isFile) node = node[part];
+    });
+  });
+
+  function render(node, depth = 0) {
+    const keys = Object.keys(node).sort((a, b) => {
+      const aIsFile = node[a] === null;
+      const bIsFile = node[b] === null;
+      if (aIsFile !== bIsFile) return aIsFile ? 1 : -1;
+      return a.localeCompare(b);
+    });
+    return keys.map(k => {
+      const indent = '  '.repeat(depth);
+      if (node[k] === null) return `${indent}${k}`;
+      return `${indent}${k}/\n${render(node[k], depth + 1)}`;
+    }).join('\n');
+  }
+
+  const rendered = render(tree);
+  // If too large, truncate with note
+  if (rendered.length > 3000) {
+    const lines = rendered.split('\n');
+    const truncated = lines.slice(0, 150).join('\n');
+    return truncated + '\n  ... (' + (lines.length - 150) + ' more files)';
+  }
+  return rendered;
+}
+
+function compressManifest(m) {
+  // Keep essential fields, truncate verbose arrays
+  const compressed = {};
+  const keep = ['manifest_version', 'name', 'version', 'description', 'permissions', 
+                'host_permissions', 'optional_permissions', 'content_scripts', 
+                'background', 'web_accessible_resources', 'action', 'browser_action',
+                'icons', 'content_security_policy', 'externally_connectable'];
+
+  keep.forEach(key => {
+    if (m[key] !== undefined) {
+      if (Array.isArray(m[key]) && m[key].length > 10) {
+        compressed[key] = m[key].slice(0, 10);
+        compressed[key + '_truncated'] = `... ${m[key].length - 10} more items`;
+      } else {
+        compressed[key] = m[key];
+      }
+    }
+  });
+  return JSON.stringify(compressed, null, 2);
+}
+
+function analyzePermissions(m) {
+  const all = [
+    ...(m.permissions || []),
+    ...(m.host_permissions || []),
+    ...(m.optional_permissions || []),
+  ];
+  if (!all.length) return 'No permissions declared.';
+
+  const high = ['<all_urls>', '*://*/*', 'nativeMessaging', 'debugger', 'proxy', 'privacy'];
+  const medium = ['history', 'webRequest', 'webRequestBlocking', 'declarativeNetRequest', 'tabs', 'cookies', 'storage'];
+
+  const riskMap = {};
+  all.forEach(p => {
+    const s = String(p);
+    if (high.some(h => s.includes(h))) riskMap[s] = 'HIGH';
+    else if (medium.some(m => s.includes(m))) riskMap[s] = 'MEDIUM';
+    else if (s.includes('*') && s.includes('://')) riskMap[s] = 'MEDIUM';
+    else riskMap[s] = 'LOW';
+  });
+
+  return Object.entries(riskMap)
+    .map(([perm, risk]) => `  [${risk}] ${perm}`)
+    .join('\n');
+}
+
+function buildContentScriptsSummary(m) {
+  if (!m.content_scripts || !m.content_scripts.length) return 'None declared.';
+  return m.content_scripts.map((cs, i) => {
+    const matches = (cs.matches || []).join(', ');
+    const js = (cs.js || []).length;
+    const css = (cs.css || []).length;
+    const allFrames = cs.all_frames ? ' (all frames)' : '';
+    return `  Entry ${i + 1}: matches=[${matches}]${allFrames}, js=${js}, css=${css}`;
+  }).join('\n');
+}
+
+function buildBackgroundSummary(m) {
+  if (!m.background) return 'None declared.';
+  const bg = m.background;
+  const parts = [];
+  if (bg.service_worker) parts.push(`service_worker: ${bg.service_worker}`);
+  if (bg.scripts) parts.push(`scripts: [${bg.scripts.join(', ')}]`);
+  if (bg.page) parts.push(`page: ${bg.page}`);
+  if (bg.persistent !== undefined) parts.push(`persistent: ${bg.persistent}`);
+  return parts.map(p => `  ${p}`).join('\n') || JSON.stringify(bg, null, 2);
 }
 
 function getAttachedFileContext() {
   if (!attachedFile) return '';
-  return `\n\nATTACHED FILE (${attachedFile.path}):
-\`\`\`
-${attachedFile.content}
-\`\`\``;
+  return `\n\nATTACHED FILE: ${attachedFile.path}\n\`\`\`\n${attachedFile.content}\n\`\`\``;
+}
+
+// ── Smart File Detection ──────────────────────────────────────────────────────
+
+function detectFileReference(text) {
+  // Patterns: "analyze X", "look at X", "check X", "what does X do", "read X"
+  const patterns = [
+    /(?:analyze|examine|inspect|check|review|look\s+at|read|what\s+is|what\s+does)\s+([\w\-.\/]+(?:\.js|\.json|\.html|\.css|\.ts|\.tsx|\.jsx|\.py|\.md)?)/i,
+    /(?:show|open|display)\s+me\s+([\w\-.\/]+(?:\.js|\.json|\.html|\.css|\.ts|\.tsx|\.jsx)?)/i,
+    /(?:the\s+file\s+)?([\w\-.\/]+(?:\.js|\.json|\.html|\.css|\.ts|\.tsx|\.jsx))\s+(?:file|code)/i,
+  ];
+
+  for (const re of patterns) {
+    const match = text.match(re);
+    if (match) {
+      const candidate = match[1];
+      // Check if it exists in fileMap
+      const exact = state.fileMap[candidate];
+      if (exact) return candidate;
+      // Try partial match
+      const partial = Object.keys(state.fileMap).find(p => 
+        p.endsWith(candidate) || p.split('/').pop() === candidate
+      );
+      if (partial) return partial;
+    }
+  }
+  return null;
+}
+
+function showAttachmentPrompt(filePath) {
+  pendingAttachmentRequest = filePath;
+  const name = filePath.split('/').pop();
+
+  const promptEl = createEl('div', {
+    className: 'my-3 p-3 bg-mc-bg2 border border-mc-border rounded-lg',
+  });
+
+  promptEl.innerHTML = `
+    <p class="text-[11px] text-mc-text mb-2">I found <code class="mono text-mc-text bg-mc-bg3 px-1 rounded">${escapeHtml(name)}</code> in this extension. Would you like me to read it?</p>
+    <div class="flex gap-2">
+      <button id="ai-attach-yes" class="px-3 py-1.5 bg-mc-text text-mc-bg text-[11px] font-medium rounded hover:bg-mc-text2 transition">Yes, read it</button>
+      <button id="ai-attach-no" class="px-3 py-1.5 bg-mc-bg2 border border-mc-border text-mc-text2 text-[11px] rounded hover:bg-mc-bg3 hover:text-mc-text transition">No</button>
+    </div>
+  `;
+
+  el.aiMessages.appendChild(promptEl);
+  scrollToBottom();
+
+  promptEl.querySelector('#ai-attach-yes').addEventListener('click', async () => {
+    promptEl.remove();
+    await attachFileByPath(pendingAttachmentRequest);
+    pendingAttachmentRequest = null;
+    // Auto-ask the question again with context
+    const lastUserMsg = chatHistory.filter(m => m.role === 'user').pop();
+    if (lastUserMsg) {
+      el.aiInput.value = lastUserMsg.content;
+      handleSend();
+    }
+  });
+
+  promptEl.querySelector('#ai-attach-no').addEventListener('click', () => {
+    promptEl.remove();
+    pendingAttachmentRequest = null;
+    appendMessage('assistant', `I will not read ${name}. Let me know if you change your mind.`, ++messageIdCounter);
+  });
 }
 
 // ── Memory Management ─────────────────────────────────────────────────────────
@@ -145,6 +350,7 @@ function disposeModel() {
   aiReady = false;
   isGenerating = false;
   attachedFile = null;
+  pendingAttachmentRequest = null;
   chatHistory = [];
   messageIdCounter = 0;
   if (el.aiMessages) clearEl(el.aiMessages);
@@ -240,27 +446,47 @@ async function handleLoadModel() {
     const msg = err?.message || String(err);
     let friendly = msg;
     let action = 'Retry';
+    let suggestion = '';
 
     if (msg.includes('Cache') || msg.includes('cache') || msg.includes('Failed to execute')) {
-      friendly = 'Model download failed. Browser storage may be full or restricted. Try clearing storage or reloading.';
-      action = 'Clear Storage & Retry';
+      friendly = 'Storage error while downloading the model.';
+      suggestion = 'Your browser storage may be full or restricted. Try clearing the model cache or using a smaller model.';
+      action = 'Clear & Retry';
       el.aiLoadBtn._clearOnRetry = true;
     } else if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) {
-      friendly = 'Network error while downloading the model. Check your connection.';
+      friendly = 'Network error while downloading the model.';
+      suggestion = 'Check your internet connection. Model files are downloaded from HuggingFace.';
     } else if (msg.includes('WebGPU') || msg.includes('webgpu') || msg.includes('GPU')) {
-      friendly = 'WebGPU is not available. Enable it in chrome://flags or use Chrome/Edge 113+.';
+      friendly = 'WebGPU is not available in this browser.';
+      suggestion = 'Enable WebGPU in chrome://flags or use Chrome/Edge 113+. Firefox and Safari do not support WebGPU yet.';
       action = 'Dismiss';
     } else if (msg.includes('out of memory') || msg.includes('OOM') || msg.includes('Memory')) {
-      friendly = `Model too large for this device (${modelCfg.size}). Try a smaller model.`;
+      friendly = `This model is too large for your device (${modelCfg.size}).`;
+      suggestion = 'Try Llama-3.2-1B (~1GB) which works on most systems with 8GB RAM.';
       action = 'Dismiss';
-    } else if (msg.includes('import') || msg.includes('module')) {
-      friendly = 'Failed to load WebLLM runtime. Check your internet connection.';
+    } else if (msg.includes('import') || msg.includes('module') || msg.includes('esm')) {
+      friendly = 'Failed to load the WebLLM runtime.';
+      suggestion = 'This may be a temporary CDN issue. Check your connection and try again.';
+    } else if (msg.includes('abort') || msg.includes('Abort') || msg.includes('cancel')) {
+      friendly = 'Download was interrupted.';
+      suggestion = 'The download may have been cancelled or timed out. Partial downloads are cached, so retrying should resume.';
     }
+
+    const errorBlock = createEl('div', {
+      className: 'mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-[11px]'
+    });
+    errorBlock.innerHTML = `<p class="text-red-400 font-medium">${escapeHtml(friendly)}</p>${suggestion ? `<p class="text-mc-text2 mt-1">${escapeHtml(suggestion)}</p>` : ''}`;
+
+    // Insert error details into the consent screen
+    const existing = el.aiConsentScreen.querySelector('.ai-error-block');
+    if (existing) existing.remove();
+    errorBlock.classList.add('ai-error-block');
+    el.aiConsentScreen.insertBefore(errorBlock, el.aiLoadProgress);
 
     setText('aiLoadStatus', friendly);
     el.aiLoadBtn.disabled = false;
     el.aiLoadBtn.textContent = action;
-    showToast('Load failed: ' + friendly);
+    showToast('Load failed');
   } finally {
     loading = false;
   }
@@ -285,19 +511,13 @@ function buildMessages() {
 
   // Attached file context
   if (attachedFile) {
-    let fileMsg = `ATTACHED FILE (${attachedFile.path}):
-\`\`\`
-${attachedFile.content}
-\`\`\``;
+    let fileMsg = `ATTACHED FILE (${attachedFile.path}):\n\`\`\`\n${attachedFile.content}\n\`\`\``;
     let ft = estimateTokens(fileMsg);
     if (ft >= budget * 0.5) {
       const allowedChars = Math.floor(Math.floor(budget * 0.5) * 2.5);
       const truncated = attachedFile.content.substring(0, allowedChars) +
         '\n/* … truncated to fit context window … */';
-      fileMsg = `ATTACHED FILE (${attachedFile.path}, truncated):
-\`\`\`
-${truncated}
-\`\`\``;
+      fileMsg = `ATTACHED FILE (${attachedFile.path}, truncated):\n\`\`\`\n${truncated}\n\`\`\``;
       ft = estimateTokens(fileMsg);
       setTimeout(() => showToast('File truncated to fit model limits'), 50);
     }
@@ -331,6 +551,18 @@ async function handleSend() {
   el.aiInput.value = '';
   setInputEnabled(false);
 
+  // Check for file reference patterns before sending
+  const fileRef = detectFileReference(text);
+  if (fileRef && !attachedFile) {
+    // Show inline attachment prompt instead of sending to AI
+    const msgId = ++messageIdCounter;
+    chatHistory.push({ id: msgId, role: 'user', content: text });
+    appendMessage('user', text, msgId);
+    showAttachmentPrompt(fileRef);
+    setInputEnabled(true);
+    return;
+  }
+
   const msgId = ++messageIdCounter;
   chatHistory.push({ id: msgId, role: 'user', content: text });
   appendMessage('user', text, msgId);
@@ -351,7 +583,7 @@ async function generateResponse() {
   try {
     const chunks = await engine.chat.completions.create({
       messages,
-      temperature: 0.5,
+      temperature: 0.4,
       max_tokens: 2048,
       stream: true,
     });
@@ -369,8 +601,8 @@ async function generateResponse() {
   } catch (err) {
     console.error(err);
     await flushRender();
-    const errText = `Error: ${err.message}`;
-    renderMarkdown(currentAssistantElement, errText, true);
+    const errText = `Error: ${err.message || 'Generation failed'}`;
+    renderMarkdown(currentAssistantElement, errText);
     chatHistory.push({ id: msgId, role: 'assistant', content: errText });
   } finally {
     isGenerating = false;
@@ -387,7 +619,7 @@ function scheduleRender() {
   pendingRender = true;
   requestAnimationFrame(() => {
     if (currentAssistantElement && currentAssistantText) {
-      renderMarkdown(currentAssistantElement, currentAssistantText, false);
+      renderMarkdown(currentAssistantElement, currentAssistantText);
     }
     pendingRender = false;
   });
@@ -396,13 +628,13 @@ function scheduleRender() {
 async function flushRender() {
   if (pendingRender) await new Promise(r => requestAnimationFrame(r));
   if (currentAssistantElement && currentAssistantText) {
-    renderMarkdown(currentAssistantElement, currentAssistantText, true);
+    renderMarkdown(currentAssistantElement, currentAssistantText);
   }
 }
 
-// ── Markdown Rendering (Monaco for code, proper formatting) ───────────────────
+// ── Markdown Rendering (Lightweight <pre> for code) ───────────────────────────
 
-function renderMarkdown(element, text, isFinal) {
+function renderMarkdown(element, text) {
   try {
     const renderer = new marked.Renderer();
 
@@ -412,30 +644,16 @@ function renderMarkdown(element, text, isFinal) {
 
     renderer.text = (token) => token.text;
 
-    // Code blocks with Monaco integration
+    // Lightweight code blocks with <pre>, no Monaco
     renderer.code = (token) => {
       const lang = token.lang || 'text';
       const code = token.text;
-      const blockId = `code-${Math.random().toString(36).slice(2, 9)}`;
-
-      // Use Monaco if available for final renders, otherwise pre
-      if (isFinal && typeof monaco !== 'undefined') {
-        setTimeout(() => initMonacoBlock(blockId, code, lang), 0);
-        return `<div class="my-2 rounded-lg border border-mc-border overflow-hidden">
-          <div class="flex items-center justify-between px-3 py-1.5 bg-mc-bg3 border-b border-mc-border">
-            <span class="text-[9px] mono text-mc-text2 uppercase">${lang}</span>
-            <button class="text-[9px] text-mc-text2 hover:text-mc-text transition copy-code-btn" data-code="${encodeURIComponent(code)}">Copy</button>
-          </div>
-          <div id="${blockId}" class="bg-mc-bg2" style="min-height:60px;max-height:400px;"></div>
-        </div>`;
-      }
-
       return `<div class="my-2 rounded-lg border border-mc-border overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 bg-mc-bg3 border-b border-mc-border">
           <span class="text-[9px] mono text-mc-text2 uppercase">${lang}</span>
           <button class="text-[9px] text-mc-text2 hover:text-mc-text transition copy-code-btn" data-code="${encodeURIComponent(code)}">Copy</button>
         </div>
-        <pre class="p-3 overflow-auto text-[11px] mono text-mc-text leading-relaxed bg-mc-bg2" style="max-height:400px;margin:0;"><code style="background:transparent;">${escapeHtml(code)}</code></pre>
+        <pre class="p-3 overflow-auto text-[11px] mono text-mc-text leading-relaxed bg-mc-bg2" style="max-height:400px;margin:0;white-space:pre;word-wrap:normal;"><code style="background:transparent;">${escapeHtml(code)}</code></pre>
       </div>`;
     };
 
@@ -453,6 +671,10 @@ function renderMarkdown(element, text, isFinal) {
       const tag = token.ordered ? 'ol' : 'ul';
       const start = token.start ? ` start="${token.start}"` : '';
       return `<${tag}${start} class="pl-4 my-2 space-y-1">${token.items.map(item => `<li class="text-mc-text2">${item.text}</li>`).join('')}</${tag}>`;
+    };
+
+    renderer.listitem = (token) => {
+      return `<li class="text-mc-text2">${token.text}</li>`;
     };
 
     renderer.blockquote = (token) => {
@@ -485,9 +707,9 @@ function renderMarkdown(element, text, isFinal) {
       return `<table class="w-full text-[11px] border border-mc-border rounded-lg overflow-hidden my-2"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
     };
 
-    // Better list item rendering
-    renderer.listitem = (token) => {
-      return `<li class="text-mc-text2">${token.text}</li>`;
+    // Better handling of inline formatting combinations
+    renderer.html = (token) => {
+      return token.text;
     };
 
     marked.use({ renderer });
@@ -495,7 +717,6 @@ function renderMarkdown(element, text, isFinal) {
     const html = marked.parse(text, { breaks: true, gfm: true });
     element.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
 
-    // Attach copy handlers
     element.querySelectorAll('.copy-code-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const code = decodeURIComponent(btn.dataset.code);
@@ -508,85 +729,79 @@ function renderMarkdown(element, text, isFinal) {
   }
 }
 
-function initMonacoBlock(id, code, lang) {
-  const container = document.getElementById(id);
-  if (!container || !monaco) return;
-
-  const mappedLang = lang === 'js' ? 'javascript' : lang === 'ts' ? 'typescript' : lang;
-  const model = monaco.editor.createModel(code, mappedLang);
-  const editor = monaco.editor.create(container, {
-    model,
-    theme: 'crx-dark',
-    readOnly: true,
-    fontSize: 11,
-    fontFamily: "'JetBrains Mono', monospace",
-    lineNumbers: 'off',
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    wordWrap: 'on',
-    automaticLayout: true,
-    folding: false,
-    renderLineHighlight: 'none',
-    contextmenu: false,
-    padding: { top: 4, bottom: 4 },
-    scrollbar: { vertical: 'hidden', horizontal: 'auto' },
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    overviewRulerBorder: false,
-  });
-
-  // Auto-height up to max
-  const lineCount = model.getLineCount();
-  const lineHeight = 17;
-  const padding = 8;
-  const desiredHeight = Math.min(lineCount * lineHeight + padding, 400);
-  container.style.height = desiredHeight + 'px';
-}
-
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
-// ── File Attachment ───────────────────────────────────────────────────────────
+// ── File Attachment (Enhanced UX) ─────────────────────────────────────────────
 
 async function attachCurrentFile() {
   if (!state.activeTabPath) { showToast('No file open'); return; }
   if (attachedFile) { showToast('Detach current file first'); return; }
+  await attachFileByPath(state.activeTabPath);
+}
 
-  const tab = state.tabs?.find(t => t.path === state.activeTabPath);
-  let content = tab?.content;
+async function attachFileByPath(path) {
+  const file = state.fileMap?.[path];
+  if (!file) { showToast('File not found'); return; }
 
-  if (!content) {
-    const file = state.fileMap?.[state.activeTabPath];
-    if (!file) { showToast('Cannot read file'); return; }
+  // Check if it's a binary file
+  const ext = path.split('.').pop().toLowerCase();
+  const binaryExts = new Set(['png','jpg','jpeg','gif','webp','ico','mp3','mp4','wav','ogg','wasm','bin']);
+  if (binaryExts.has(ext)) {
+    showToast('Cannot attach binary files');
+    return;
+  }
+
+  let content = '';
+  const tab = state.tabs?.find(t => t.path === path);
+  if (tab?.content) {
+    content = tab.content;
+  } else {
     try { content = await file.async('string'); }
     catch { showToast('Cannot read file'); return; }
   }
 
-  const maxChars = 8000;
+  // Smart truncation with head+tail for large files
+  const maxChars = 12000;
   let displayContent = content;
+  let wasTruncated = false;
   if (content.length > maxChars) {
-    const half = Math.floor(maxChars / 2);
-    displayContent = content.substring(0, half) +
-      '\n\n/* … truncated … */\n\n' +
-      content.substring(content.length - half);
+    const headSize = Math.floor(maxChars * 0.6);
+    const tailSize = Math.floor(maxChars * 0.4);
+    displayContent = content.substring(0, headSize) +
+      '\n\n/* … ' + (content.length - headSize - tailSize) + ' characters omitted … */\n\n' +
+      content.substring(content.length - tailSize);
+    wasTruncated = true;
   }
 
   attachedFile = {
-    path: state.activeTabPath,
+    path: path,
     content: displayContent,
     fullLength: content.length,
+    wasTruncated,
   };
 
   updateAttachUI();
-  showToast(`Attached: ${state.activeTabPath.split('/').pop()}`);
+
+  const name = path.split('/').pop();
+  if (wasTruncated) {
+    showToast(`Attached ${name} (truncated)`);
+    addSystemMessage(`Attached ${name} · ${content.length.toLocaleString()} chars · head + tail shown`);
+  } else {
+    showToast(`Attached ${name}`);
+    addSystemMessage(`Attached ${name} · ${content.length.toLocaleString()} chars`);
+  }
 }
 
 function detachFile() {
+  if (!attachedFile) return;
+  const name = attachedFile.path.split('/').pop();
   attachedFile = null;
   updateAttachUI();
+  showToast(`Detached ${name}`);
 }
 
 function updateAttachUI() {
@@ -595,12 +810,15 @@ function updateAttachUI() {
     const size = attachedFile.fullLength > 1000
       ? `${(attachedFile.fullLength / 1000).toFixed(1)}k chars`
       : `${attachedFile.fullLength} chars`;
-    setText('aiContextFile', `${name} · ${size}`);
+    const truncBadge = attachedFile.wasTruncated ? ' · truncated' : '';
+    setText('aiContextFile', `${name} · ${size}${truncBadge}`);
     el.aiContextBar.classList.remove('hidden');
     el.aiContextBar.classList.add('flex');
+    el.aiUseFileBtn.classList.add('hidden');
   } else {
     el.aiContextBar.classList.add('hidden');
     el.aiContextBar.classList.remove('flex');
+    el.aiUseFileBtn.classList.remove('hidden');
   }
 }
 
@@ -616,9 +834,10 @@ function clearChat() {
   chatHistory = [];
   messageIdCounter = 0;
   attachedFile = null;
+  pendingAttachmentRequest = null;
   updateAttachUI();
   clearEl(el.aiMessages);
-  addSystemMessage('Chat cleared. Ready for new questions.');
+  addSystemMessage('Chat cleared. Ask me anything about this extension.');
 }
 
 function addSystemMessage(text) {
