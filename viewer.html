@@ -81,12 +81,21 @@
   #markdownContent th, #markdownContent td { border: 1px solid var(--border-color); padding: 0.5em; text-align: left; }
   #markdownContent th { background: var(--bg-secondary); font-weight: 600; }
 
-  /* AI Panel */
+  /* modAI Panel */
   #aiPanel { contain: layout; }
   #aiMessages { scroll-behavior: smooth; overflow-anchor: none; }
-  .ai-msg-user { background: var(--bg-tertiary); }
-  .ai-msg-ai { background: var(--bg-secondary); }
+  .ai-msg-user { background: var(--bg-tertiary); border: 1px solid var(--border-color); }
+  .ai-msg-ai { background: var(--bg-secondary); border: 1px solid var(--border-color); }
+  .ai-msg-ai p { margin-bottom: 0.5em; }
+  .ai-msg-ai p:last-child { margin-bottom: 0; }
+  .ai-msg-ai ul, .ai-msg-ai ol { margin-bottom: 0.5em; padding-left: 1.25em; }
+  .ai-msg-ai li { margin-bottom: 0.25em; }
+  .ai-msg-ai strong { color: var(--text-primary); }
+  .ai-msg-ai em { color: var(--text-secondary); }
+  .ai-msg-ai code { font-size: 10px; }
+  .ai-msg-ai blockquote { margin: 0.5em 0; }
 </style>
+<base target="_blank">
 <base target="_blank">
 <base target="_blank">
 </head>
@@ -181,11 +190,11 @@
 </div>
 
 <!-- AI Panel -->
-<div id="aiPanel" class="fixed top-12 right-0 bottom-0 w-[420px] max-w-full bg-mc-bg border-l border-mc-border z-40 transform translate-x-full transition-transform duration-200 flex flex-col" role="complementary" aria-label="AI Assistant">
+<div id="aiPanel" class="fixed top-12 right-0 bottom-0 w-[420px] max-w-full bg-mc-bg border-l border-mc-border z-40 transform translate-x-full transition-transform duration-200 flex flex-col" role="complementary" aria-label="modAI">
   <div class="flex items-center justify-between px-4 py-3 border-b border-mc-border flex-shrink-0">
     <div class="flex items-center gap-2">
       <i class="fa-solid fa-microchip text-mc-text text-xs"></i>
-      <h3 class="text-xs font-semibold text-mc-text uppercase tracking-wider">AI Assistant</h3>
+      <h3 class="text-xs font-semibold text-mc-text uppercase tracking-wider">modAI</h3>
       <span id="aiModelBadge" class="text-[9px] px-1.5 py-0.5 rounded bg-mc-bg3 text-mc-text2 mono hidden"></span>
     </div>
     <button id="closeAiPanel" class="text-mc-text2 hover:text-mc-text transition" aria-label="Close AI panel"><i class="fa-solid fa-xmark"></i></button>
@@ -197,8 +206,8 @@
       <i class="fa-solid fa-microchip text-xl text-mc-text"></i>
     </div>
     <div>
-      <p class="text-sm font-semibold text-mc-text mb-1">Privacy-First AI</p>
-      <p class="text-[11px] text-mc-text2 leading-relaxed">AI runs entirely in your browser using WebLLM and WebGPU. No data leaves your device. You must explicitly load the model before use.</p>
+      <p class="text-sm font-semibold text-mc-text mb-1">modAI</p>
+      <p class="text-[11px] text-mc-text2 leading-relaxed">modAI runs entirely in your browser using WebLLM and WebGPU. No data leaves your device. You must explicitly load the model before use.</p>
     </div>
     <div class="w-full bg-mc-bg2 border border-mc-border rounded-lg p-3 text-left space-y-2">
       <p class="text-[10px] font-semibold text-mc-text uppercase tracking-wider">Model</p>
@@ -211,9 +220,14 @@
       </select>
       <p class="text-[10px] text-mc-text2">Model is downloaded once and cached in your browser.</p>
     </div>
-    <button id="aiLoadBtn" class="px-5 py-2 bg-mc-text text-mc-bg text-sm font-medium rounded-std hover:bg-mc-text2 transition w-full">
-      Load Model Locally
-    </button>
+    <div class="flex gap-2 w-full">
+      <button id="aiLoadBtn" class="flex-1 px-5 py-2 bg-mc-text text-mc-bg text-sm font-medium rounded-std hover:bg-mc-text2 transition">
+        Load Model
+      </button>
+      <button id="aiResetCacheBtn" class="px-3 py-2 bg-mc-bg2 border border-mc-border text-mc-text2 text-sm rounded-std hover:bg-mc-bg3 hover:text-mc-text transition" title="Clear downloaded model data">
+        <i class="fa-solid fa-trash-can text-xs"></i>
+      </button>
+    </div>
     <div id="aiLoadProgress" class="hidden w-full space-y-1">
       <div class="flex justify-between text-[10px] text-mc-text2 mono">
         <span id="aiLoadStatus">Loading...</span>
@@ -235,7 +249,7 @@
         <button id="aiClearContext" class="text-mc-text2 hover:text-mc-text px-1" aria-label="Detach file"><i class="fa-solid fa-xmark text-[9px]"></i></button>
       </div>
       <div class="relative">
-        <textarea id="aiInput" rows="2" placeholder="Ask about this extension..." class="w-full bg-mc-bg2 border border-mc-border text-mc-text text-xs rounded-lg px-3 py-2 pr-10 focus:outline-none focus:border-mc-text placeholder-mc-text2 mono resize-none transition" aria-label="AI chat input"></textarea>
+        <textarea id="aiInput" rows="2" placeholder="Ask modAI about this extension..." class="w-full bg-mc-bg2 border border-mc-border text-mc-text text-xs rounded-lg px-3 py-2 pr-10 focus:outline-none focus:border-mc-text placeholder-mc-text2 mono resize-none transition" aria-label="Ask modAI"></textarea>
         <button id="aiSendBtn" class="absolute right-2 bottom-2 w-7 h-7 bg-mc-text text-mc-bg rounded-md hover:bg-mc-text2 transition flex items-center justify-center" aria-label="Send message">
           <i class="fa-solid fa-paper-plane text-[10px]"></i>
         </button>
@@ -286,8 +300,8 @@
     <button id="securityBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-mc-text2 hover:text-mc-text hover:bg-mc-bg2 transition border border-transparent hover:border-mc-border" aria-label="Security report">
       <i class="fa-solid fa-shield-halved"></i> Security
     </button>
-    <button id="aiBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-mc-text2 hover:text-mc-text hover:bg-mc-bg2 transition border border-transparent hover:border-mc-border" aria-label="AI Assistant">
-      <i class="fa-solid fa-microchip"></i> AI
+    <button id="aiBtn" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-mc-text2 hover:text-mc-text hover:bg-mc-bg2 transition border border-transparent hover:border-mc-border" aria-label="modAI">
+      <i class="fa-solid fa-microchip"></i> modAI
     </button>
     <button id="shortcutsBtn" class="items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-mc-text2 hover:text-mc-text hover:bg-mc-bg2 transition border border-transparent hover:border-mc-border" aria-label="Keyboard shortcuts">
       <i class="fa-solid fa-keyboard"></i>
