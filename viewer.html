@@ -218,7 +218,7 @@
         <option value="Llama-3.2-3B">Llama 3.2 3B (~2.5 GB, better)</option>
         <option value="Mistral-7B">Mistral 7B (~5.5 GB, powerful)</option>
       </select>
-      <p class="text-[10px] text-mc-text2">Model is downloaded once and cached in your browser.</p>
+      <p class="text-[10px] text-mc-text2">Model downloads once and stays cached. Use Reset Cache to free space.</p>
     </div>
     <div class="flex gap-2 w-full">
       <button id="aiLoadBtn" class="flex-1 px-5 py-2 bg-mc-text text-mc-bg text-sm font-medium rounded-std hover:bg-mc-text2 transition">
@@ -243,10 +243,10 @@
   <div id="aiChatScreen" class="hidden flex-col flex-1 overflow-hidden">
     <div id="aiMessages" class="flex-1 overflow-auto p-3 space-y-3 text-xs"></div>
     <div class="border-t border-mc-border p-3 flex-shrink-0 space-y-2">
-      <div id="aiContextBar" class="hidden text-[10px] text-mc-text2 flex items-center gap-1.5 px-2 py-1 bg-mc-bg2 rounded border border-mc-border">
-        <i class="fa-solid fa-paperclip text-[9px]"></i>
-        <span id="aiContextFile" class="truncate flex-1"></span>
-        <button id="aiClearContext" class="text-mc-text2 hover:text-mc-text px-1" aria-label="Detach file"><i class="fa-solid fa-xmark text-[9px]"></i></button>
+      <div id="aiContextBar" class="hidden text-[10px] text-mc-text flex items-center gap-2 px-3 py-2 bg-mc-bg3/50 rounded-lg border border-mc-border">
+        <i class="fa-solid fa-file-code text-mc-text text-[10px]"></i>
+        <span id="aiContextFile" class="truncate flex-1 mono"></span>
+        <button id="aiClearContext" class="text-mc-text2 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-mc-bg2 transition" aria-label="Detach file" title="Detach file"><i class="fa-solid fa-xmark text-[9px]"></i></button>
       </div>
       <div class="relative">
         <textarea id="aiInput" rows="2" placeholder="Ask modAI about this extension..." class="w-full bg-mc-bg2 border border-mc-border text-mc-text text-xs rounded-lg px-3 py-2 pr-10 focus:outline-none focus:border-mc-text placeholder-mc-text2 mono resize-none transition" aria-label="Ask modAI"></textarea>
@@ -256,8 +256,8 @@
       </div>
       <div class="flex items-center justify-between px-1">
         <div class="flex items-center gap-2">
-          <button id="aiUseFileBtn" class="text-[10px] text-mc-text2 hover:text-mc-text transition flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-mc-bg2" title="Attach current file (max 1)">
-            <i class="fa-solid fa-paperclip text-[9px]"></i> Attach file
+          <button id="aiUseFileBtn" class="text-[10px] text-mc-text2 hover:text-mc-text transition flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-mc-bg2 border border-transparent hover:border-mc-border" title="Attach the currently open file">
+            <i class="fa-solid fa-paperclip text-[9px]"></i> Attach current file
           </button>
           <span id="aiAttachHint" class="text-[9px] text-mc-text2 hidden">Max 1 file</span>
         </div>
