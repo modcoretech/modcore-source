@@ -62,7 +62,16 @@ export function initAI() {
   if (!el.aiLoadBtn) return;
 
   buildModelSelect();
-  el.aiLoadBtn.addEventListener('click', handleLoadModel);
+  el.aiLoadBtn.addEventListener('click', () => {
+    if (el.aiLoadBtn._clearOnRetry) {
+      el.aiLoadBtn._clearOnRetry = false;
+      clearModelCache().then(() => {
+        setTimeout(handleLoadModel, 300);
+      });
+      return;
+    }
+    handleLoadModel();
+  });
   el.aiSendBtn.addEventListener('click', handleSend);
   el.aiInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -171,7 +180,10 @@ async function handleLoadModel() {
   el.aiLoadBar.style.width = '0%';
 
   try {
-    if (!webllmModule) webllmModule = await import(WEBLLM_CDN);
+    if (!webllmModule) {
+      setText('aiLoadStatus', 'Importing WebLLM runtime…');
+      webllmModule = await import(WEBLLM_CDN);
+    }
     const { CreateMLCEngine } = webllmModule;
 
     setText('aiLoadStatus', `Downloading ${modelKey}…`);
@@ -196,10 +208,31 @@ async function handleLoadModel() {
     showToast(`${modelKey} ready`);
   } catch (err) {
     console.error(err);
-    setText('aiLoadStatus', `Error: ${err.message}`);
+    const msg = err?.message || String(err);
+    let friendly = msg;
+    let action = 'Retry';
+
+    if (msg.includes('Cache') || msg.includes('cache')) {
+      friendly = 'Model download failed. The browser cache may be corrupted or storage is full.';
+      action = 'Clear Cache & Retry';
+      // Auto-clear on next click
+      el.aiLoadBtn._clearOnRetry = true;
+    } else if (msg.includes('network') || msg.includes('fetch') || msg.includes('Failed to fetch')) {
+      friendly = 'Network error while downloading the model. Check your connection and try again.';
+    } else if (msg.includes('WebGPU') || msg.includes('webgpu') || msg.includes('GPU')) {
+      friendly = 'WebGPU is not available or enabled in this browser. Enable it in chrome://flags or try a different browser.';
+      action = 'Dismiss';
+    } else if (msg.includes('out of memory') || msg.includes('OOM') || msg.includes('Memory')) {
+      friendly = `The model is too large for this device (${modelCfg.size}). Try a smaller model like Llama-3.2-1B.`;
+      action = 'Dismiss';
+    } else if (msg.includes('import') || msg.includes('module')) {
+      friendly = 'Failed to load the WebLLM runtime. Check your internet connection or try again later.';
+    }
+
+    setText('aiLoadStatus', friendly);
     el.aiLoadBtn.disabled = false;
-    el.aiLoadBtn.textContent = 'Retry';
-    showToast('Load failed: ' + err.message);
+    el.aiLoadBtn.textContent = action;
+    showToast('Load failed: ' + friendly);
   } finally {
     loading = false;
   }
